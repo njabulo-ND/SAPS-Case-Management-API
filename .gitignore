@@ -1,0 +1,9 @@
+myvenv/
+.env
+ngrok.exe
+tempCodeRunnerFile.py
+saps-database-firebase-adminsdk-fbsvc-708fe1391c.json
+SAPS DATABASE.sql
+verification.py
+request.py
+jsonToReadData.json
