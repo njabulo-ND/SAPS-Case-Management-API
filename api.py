@@ -9,9 +9,63 @@ from flask_cors import CORS
 import firebase_admin
 from firebase_admin import credentials, firestore, exceptions as firebase_exceptions
 from werkzeug.exceptions import HTTPException
+import secrets
+import smtplib
+from email.message import EmailMessage
 import os
 from dotenv import load_dotenv
 
+load_dotenv()
+
+def send_otp_email(receiver_email):
+    try:
+        
+        # 1. Generate a secure 6-digit OTP
+        otp = "".join(secrets.choice("0123456789") for _ in range(6))
+
+        # 2. Automatically pull your hidden credentials
+        sender_email =os.getenv("EMAIL_USER")
+        sender_password = os.getenv("EMAIL_PASS")
+
+        # Safety check to make sure the variables loaded correctly
+        if not sender_email or not sender_password:
+            print("Error: Could not find your email credentials in the .env file.")
+            return None
+
+        # 3. Configure server details
+        smtp_server = "smtp.gmail.com"
+        smtp_port = 587
+
+        # 4. Create the email content
+            # 4. Create a more formal email structure to pass spam filters
+        msg = EmailMessage()
+        # Change "Your Business Name" to whatever you want people to see
+        msg["From"] = f"SAPS Case Management System <{sender_email}>"
+        msg["Subject"] = "Security Verification: Your One-Time Password Code"
+        # msg["From"] = sender_email
+        msg["To"] = receiver_email
+        msg.set_content(
+    f"Dear Officer,"
+    f"We received a request to log in to / sign up for your SAPS Case Management "
+    f"account. Please use the following One-Time Password (OTP) to complete your "
+    f"verification:"
+    f"Verification Code: {otp}"
+    f"This code was generated securely and will expire shortly. If you did not "
+    f"initiate this request, please contact your system administrator immediately."
+    f"Regards,")
+        # 5. Connect and send
+        
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+                server.starttls()
+                server.login(sender_email, sender_password)
+                server.send_message(msg)
+
+        print(f"OTP successfully sent to {receiver_email}!")
+        return otp
+
+    except Exception as e:
+        print(f"Failed to send email. Error: {e}")
+        return None
 try:
 
     load_dotenv()
@@ -104,6 +158,7 @@ except Exception as e:
 # 4. Account Setup:
 #    - Allows verified employees to create their login password.
 # ==========================================================
+otp = ''
 try:
     class EmployeeDetails(Resource):
         def get(self):
@@ -128,6 +183,7 @@ try:
                 user_password = request.args.get('password')
                 rank = request.args.get('rank')
                 case_type = request.args.get('case_type')
+                otp_from_user = str(request.args.get('otp'))
 
                 if action is None:
                     return {'act`ion': 'add action'}
@@ -188,7 +244,8 @@ try:
 
                             if firebase_password == user_password:
                                 save_json_data({'password': 'matches'})
-                                return {doc.id: doc.to_dict(), 'status': 'found'}
+                                otp = send_otp_email("ayabulelandzombane@gmail.com")
+                                return {doc.id: doc.to_dict(), 'status': 'otp_sent'}
 
                             elif firebase_password != user_password:
                                 save_json_data({'password': 'not matching'})
@@ -201,7 +258,11 @@ try:
                     else:
                         save_json_data({'employee': 'does exists'})
                         return {'status': 'not found'}
-
+                if action == 'verify_otp':
+                    if otp_from_user == otp:
+                       return {doc.id: doc.to_dict(), 'status': 'verified'}
+                    else:
+                         return {'status':'invalid_otp'}
         
                 if action.lower() == 'filter':
                     if rank and case_type:
@@ -445,6 +506,7 @@ try:
                         return {'status': 'added'}
                     
                     else:
+                        save_json_data({'status': 'no case number to add invistigation diary'})
                         return {'status': 'no case number'}
                     
                 elif data.get('modusOperandi'):
@@ -464,6 +526,7 @@ try:
                         return {'status': 'added'}
                     
                     else:
+                        save_json_data({'status': 'no case number to add modusOperandi'})
                         return {'status': 'no case number'}
 
                 elif data.get('statement'):
@@ -483,6 +546,7 @@ try:
                         return {'status': 'added'}
                     
                     else:
+                        save_json_data({'status': 'statement not added'})
                         return {'status': 'no case number'}
                     
                 # Assigning police to a case
