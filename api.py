@@ -244,7 +244,7 @@ try:
                         if firebase_password:
 
                             if firebase_password == user_password:
-                                otp = send_otp_email("ayabulelandzombane@gmail.com")
+                                otp = send_otp_email("njbldhladhla@gmail.com")
                                 otp_store[employee_id] = otp
                                 return {doc.id: doc.to_dict(), 'status': 'otp_sent'}
                             
@@ -259,6 +259,11 @@ try:
                     else:
                         save_json_data({'employee': 'does exists'})
                         return {'status': 'not found'}
+
+
+
+
+                    
                 if action == 'verify_otp':
                     stored_otp = otp_store.get(employee_id)
                     if otp_from_user == stored_otp:
@@ -267,6 +272,10 @@ try:
                     else:
                         return {'status': 'invalid_otp'}
         
+
+
+
+
                 if action.lower() == 'filter':
                     if rank and case_type:
                         query = """
