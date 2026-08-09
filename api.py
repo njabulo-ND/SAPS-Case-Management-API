@@ -159,6 +159,7 @@ except Exception as e:
 #    - Allows verified employees to create their login password.
 # ==========================================================
 otp = ''
+otp_store = {}  # add near the top, alongside 
 try:
     class EmployeeDetails(Resource):
         def get(self):
@@ -243,10 +244,10 @@ try:
                         if firebase_password:
 
                             if firebase_password == user_password:
-                                save_json_data({'password': 'matches'})
                                 otp = send_otp_email("ayabulelandzombane@gmail.com")
+                                otp_store[employee_id] = otp
                                 return {doc.id: doc.to_dict(), 'status': 'otp_sent'}
-
+                            
                             elif firebase_password != user_password:
                                 save_json_data({'password': 'not matching'})
                                 return {'status': 'does not match'}
@@ -259,10 +260,12 @@ try:
                         save_json_data({'employee': 'does exists'})
                         return {'status': 'not found'}
                 if action == 'verify_otp':
-                    if otp_from_user == otp:
-                       return {doc.id: doc.to_dict(), 'status': 'verified'}
+                    stored_otp = otp_store.get(employee_id)
+                    if otp_from_user == stored_otp:
+                        doc = firebase_db.collection('employees').document(employee_id).get()
+                        return {doc.id: doc.to_dict(), 'status': 'verified'}
                     else:
-                         return {'status':'invalid_otp'}
+                        return {'status': 'invalid_otp'}
         
                 if action.lower() == 'filter':
                     if rank and case_type:
