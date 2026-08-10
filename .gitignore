@@ -7,3 +7,5 @@ SAPS DATABASE.sql
 verification.py
 request.py
 jsonToReadData.json
+pdfcreation.py
+output.pdf
