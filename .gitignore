@@ -1,5 +1,7 @@
+venv/
 myvenv/
-.env
+.env/
+__pycache__/
 ngrok.exe
 tempCodeRunnerFile.py
 saps-database-firebase-adminsdk-fbsvc-708fe1391c.json
