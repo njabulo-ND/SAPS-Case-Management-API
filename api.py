@@ -272,8 +272,7 @@ def invistigation_diary_form(p21_form, case_number):
         P21 form or the one i sent along with the p21 form.
         
         3. entries
-        A list of diary entries describing what happened. Include ONE entry
-        containing:
+        A list of diary entries describing what happened.
         - date: the date the incident occurred, as stated in the statement
         - time: the time the incident occurred, as stated in the statement
         - particulars: a factual, investigator-useful account of what
@@ -410,8 +409,7 @@ def modus_operandi(p21_form, case_number):
         
         A_offence - what actually happened to the victim; the specific crime
         or wrongdoing committed against them, which is the reason this case
-        was opened (e.g. robbery, assault, theft,etc) for robbery ralated cases just say robbery dont specify
-        what type of it just write robbery.
+        was opened (e.g. robbery, assault, theft,etc).
         
         B_date - the date on which the offence occurred, i.e. the date the
         victim was victimised, as stated in the statement.
@@ -1045,17 +1043,17 @@ try:
                     save_json_data({'data sent': data})
                     p21_form = json.dumps(data.get('p21'))
                     victim = data.get('victim')
-                    initials = data.get('initials')
+                    email_FE = data.get('email')
                     # Sending p21 to SQL and returning casenumber
                     query = """
                                 INSERT INTO CASES(P21,VICTIM,VICTIM_EMAIL,STATUS)
                                 OUTPUT INSERTED.CASE_NUMBER
                                 VALUES
-                                (:p21,:victim,:initials,'ACTIVE');
+                                (:p21,:victim,:email,'UNASSIGNED');
                         """
                     with engine.connect() as conn:
                         result = conn.execute(
-                            text(query), {'p21': p21_form, 'victim': victim, 'initials': initials})
+                            text(query), {'p21': p21_form, 'victim': victim, 'email': email_FE})
                         case_number = result.fetchone()[0]
                         conn.commit()
 
@@ -1069,21 +1067,6 @@ try:
                     save_json_data({'statement': statement_results,
                                    'investigation': invistigation_diary_results, 'modus': modus_results})
 
-                    # Emailing victim about the activation of the case
-                    case_message = (
-                        f"Dear Complainant,\n\n"
-                        f"This is to formally confirm that your case has been successfully "
-                        f"logged and activated within the SAPS Case Management System.\n\n"
-                        f"Case number: {case_number}\n\n"
-                        f"Please retain this case number for future reference, as it will be "
-                        f"required for any enquiries regarding the progress of your case. You "
-                        f"will be notified as further updates become available, including once "
-                        f"an investigating officer has been assigned.\n\n"
-                        f"Regards,\n"
-                        f"SAPS Case Management System"
-                    )
-                    sending_victim_email(case_message, initials)
-                    # save_json_data({'Email':'Sent to victim'})
                     # Sending all the Autofilled forms to front end
                     return {"caseNumber": case_number, 'investigationDiary': invistigation_diary_results, "modusOperandi": modus_results,
                             "statement": statement_results}
@@ -1125,6 +1108,34 @@ try:
                                 text(query), {'operandi': form, 'number': case_number})
                             conn.commit()
                         save_json_data(data)
+                        # Emailing victim about the activation of the case
+                        query = """
+                                    SELECT VICTIM_EMAIL
+                                    FROM CASES
+                                    WHERE CASE_NUMBER = ?;"""
+                        df = pd.read_sql(
+                            query, engine, params=(str(case_number),))
+                        employee_rows = df.to_dict(orient='records')
+                        if employee_rows:
+                            email_result = employee_rows[0]
+                            victim_email = email_result.get('VICTIM_EMAIL')
+
+                            case_message = (
+                                f"Dear Complainant,\n\n"
+                                f"This is to formally confirm that your case has been successfully "
+                                f"logged and activated within the SAPS Case Management System.\n\n"
+                                f"Case number: {case_number}\n\n"
+                                f"Please retain this case number for future reference, as it will be "
+                                f"required for any enquiries regarding the progress of your case. You "
+                                f"will be notified as further updates become available, including once "
+                                f"an investigating officer has been assigned.\n\n"
+                                f"Regards,\n"
+                                f"SAPS JHB CENTRAL STATION"
+                            )
+                            sending_victim_email(case_message,victim_email)
+                            save_json_data({'Email': 'Sent to victim'})
+                        else:
+                            save_json_data({'Email': 'Not Sent to victim'})
                         return {'status': 'added'}
 
                     else:
@@ -1175,7 +1186,7 @@ try:
 
                         # Validating if the assignment was successful then updates the victim about the assignment
                         if rows_updated > 0:
-                            #Changing the status of the case after assignement
+                            # Changing the status of the case after assignement
                             query = """
                                         UPDATE CASES
                                         SET STATUS = 'IN PROGRESS'
@@ -1186,10 +1197,11 @@ try:
                                     text(query), {'case_number': case_number})
                                 conn.commit()
                                 another_rows_updated = result.rowcount
-                                
-                            save_json_data({'Status change to in progress row count':another_rows_updated})
 
-                            #Finding information of the assigned case
+                            save_json_data(
+                                {'Status change to in progress row count': another_rows_updated})
+
+                            # Finding information of the assigned case
                             query = """
                                         SELECT E.NAME,E.SURNAME,E.RANKS,E.EMAIL,C.VICTIM_EMAIL
                                         FROM EMPLOYEES E
