@@ -1,6 +1,7 @@
 venv/
 myvenv/
 .env/
+.env
 __pycache__/
 ngrok.exe
 tempCodeRunnerFile.py
