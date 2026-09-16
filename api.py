@@ -17,8 +17,8 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import errors
 from google.genai import types
-import math
-
+from datetime import datetime, timedelta
+import password_recovery
 
 load_dotenv()
 
@@ -274,7 +274,8 @@ def invistigation_diary_form(p21_form, case_number):
         P21 form or the one i sent along with the p21 form.
         
         3. entries
-        A list of diary entries describing what happened.
+        A list of diary entries describing what happened. Include ONE entry
+        containing:
         - date: the date the incident occurred, as stated in the statement
         - time: the time the incident occurred, as stated in the statement
         - particulars: a factual, investigator-useful account of what
@@ -371,7 +372,7 @@ def modus_operandi(p21_form, case_number):
                             "initialAndSurname": {"type": "STRING"},
                         },
                         "required": ["no", "rank", "initialAndSurname"],
-                    },
+                        },
                 "O_perusedBy": {
                         "type": "OBJECT",
                         "properties": {
@@ -380,7 +381,7 @@ def modus_operandi(p21_form, case_number):
                             "initialAndSignature": {"type": "STRING"},
                         },
                         "required": ["no", "rank", "initialAndSignature"],
-                    },
+                        },
             },
             "required": [
                 "caseNumber", "ir", "A_offence", "B_date", "C_time", "D_place",
@@ -411,7 +412,8 @@ def modus_operandi(p21_form, case_number):
         
         A_offence - what actually happened to the victim; the specific crime
         or wrongdoing committed against them, which is the reason this case
-        was opened (e.g. robbery, assault, theft,etc).
+        was opened (e.g. robbery, assault, theft,etc) for robbery ralated cases just say robbery dont specify
+        what type of it just write robbery.
         
         B_date - the date on which the offence occurred, i.e. the date the
         victim was victimised, as stated in the statement.
@@ -781,7 +783,9 @@ try:
                         if doc.exists:
                             otp = send_otp_email(
                                 empty_dict[employee_id].get('email'))
-                            otp_store[employee_id] = otp
+                            otp_store[employee_id] = {'otp': otp,
+                                                      'expiry': datetime.now() + timedelta(minutes=5)
+                                                      }
                             save_json_data(
                                 {'data': f'sent to firebase and email {empty_dict[employee_id].get('email')}\nOtp {otp_store[employee_id]}'})
                             empty_dict.update({'status': 'found'})
@@ -821,13 +825,30 @@ try:
 
                 if action == 'verify_otp':
                     stored_otp = otp_store.get(employee_id)
-                    if otp_from_user == stored_otp:
-                        doc = firebase_db.collection(
-                            'employees').document(employee_id).get()
-                        return {doc.id: doc.to_dict(), 'status': 'verified'}
+                    if stored_otp:
+                        if datetime.now() > stored_otp.get('expiry'):
+                            save_json_data({'forgot password otp': 'expired'})
+                            return {'status': 'time out'}
+                        if otp_from_user == stored_otp.get('otp'):
+                            doc = firebase_db.collection(
+                                'employees').document(employee_id).get()
+                            save_json_data({'forgot password otp': 'verified'})
+                            return {doc.id: doc.to_dict(), 'status': 'verified'}
+                        
+                        else:
+                            return {'status': 'invalid_otp'}
                     else:
-                        return {'status': 'invalid_otp'}
+                        return {'Status': 'Employee number not found'}
 
+                if action == 'forgotPassword_otp':
+                    otp = password_recovery.check_employee_and_sendotp(
+                        employee_id)
+                    if otp.isdigit():
+                        otp_store[employee_id] = {'otp': otp,
+                                                'expiry': datetime.now() + timedelta(minutes=5)
+                                                }
+                        save_json_data({'otp for forgot password': 'sent'})
+                        return {'status':'sent'}
                 if action.lower() == 'filter':
                     if rank and case_type:
                         query = """
@@ -1045,17 +1066,17 @@ try:
                     save_json_data({'data sent': data})
                     p21_form = json.dumps(data.get('p21'))
                     victim = data.get('victim')
-                    email_FE = data.get('email')
+                    initials = data.get('initials')
                     # Sending p21 to SQL and returning casenumber
                     query = """
                                 INSERT INTO CASES(P21,VICTIM,VICTIM_EMAIL,STATUS)
                                 OUTPUT INSERTED.CASE_NUMBER
                                 VALUES
-                                (:p21,:victim,:email,'UNASSIGNED');
+                                (:p21,:victim,:initials,'ACTIVE');
                         """
                     with engine.connect() as conn:
                         result = conn.execute(
-                            text(query), {'p21': p21_form, 'victim': victim, 'email': email_FE})
+                            text(query), {'p21': p21_form, 'victim': victim, 'initials': initials})
                         case_number = result.fetchone()[0]
                         conn.commit()
 
@@ -1069,6 +1090,21 @@ try:
                     save_json_data({'statement': statement_results,
                                    'investigation': invistigation_diary_results, 'modus': modus_results})
 
+                    # Emailing victim about the activation of the case
+                    case_message = (
+                        f"Dear Complainant,\n\n"
+                        f"This is to formally confirm that your case has been successfully "
+                        f"logged and activated within the SAPS Case Management System.\n\n"
+                        f"Case number: {case_number}\n\n"
+                        f"Please retain this case number for future reference, as it will be "
+                        f"required for any enquiries regarding the progress of your case. You "
+                        f"will be notified as further updates become available, including once "
+                        f"an investigating officer has been assigned.\n\n"
+                        f"Regards,\n"
+                        f"SAPS Case Management System"
+                    )
+                    sending_victim_email(case_message, initials)
+                    # save_json_data({'Email':'Sent to victim'})
                     # Sending all the Autofilled forms to front end
                     return {"caseNumber": case_number, 'investigationDiary': invistigation_diary_results, "modusOperandi": modus_results,
                             "statement": statement_results}
@@ -1110,34 +1146,6 @@ try:
                                 text(query), {'operandi': form, 'number': case_number})
                             conn.commit()
                         save_json_data(data)
-                        # Emailing victim about the activation of the case
-                        query = """
-                                    SELECT VICTIM_EMAIL
-                                    FROM CASES
-                                    WHERE CASE_NUMBER = ?;"""
-                        df = pd.read_sql(
-                            query, engine, params=(str(case_number),))
-                        employee_rows = df.to_dict(orient='records')
-                        if employee_rows:
-                            email_result = employee_rows[0]
-                            victim_email = email_result.get('VICTIM_EMAIL')
-
-                            case_message = (
-                                f"Dear Complainant,\n\n"
-                                f"This is to formally confirm that your case has been successfully "
-                                f"logged and activated within the SAPS Case Management System.\n\n"
-                                f"Case number: {case_number}\n\n"
-                                f"Please retain this case number for future reference, as it will be "
-                                f"required for any enquiries regarding the progress of your case. You "
-                                f"will be notified as further updates become available, including once "
-                                f"an investigating officer has been assigned.\n\n"
-                                f"Regards,\n"
-                                f"SAPS JHB CENTRAL STATION"
-                            )
-                            sending_victim_email(case_message,victim_email)
-                            save_json_data({'Email': 'Sent to victim'})
-                        else:
-                            save_json_data({'Email': 'Not Sent to victim'})
                         return {'status': 'added'}
 
                     else:
@@ -1287,1100 +1295,6 @@ except urllib.error.URLError as e:
     print(f"URL Error: {e}")
 
 
-class CommanderAnalytics(Resource):
-
-    # ==========================================================
-    # Convert Pandas / Python values into valid JSON values
-    # ==========================================================
-
-    @staticmethod
-    def make_json_safe(value):
-
-        # None is already JSON-safe
-        if value is None:
-            return None
-
-        # Handle dictionaries
-        if isinstance(value, dict):
-            return {
-                key: CommanderAnalytics.make_json_safe(val)
-                for key, val in value.items()
-            }
-
-        # Handle lists / tuples
-        if isinstance(value, (list, tuple)):
-            return [
-                CommanderAnalytics.make_json_safe(item)
-                for item in value
-            ]
-
-        # Handle Pandas NA
-        try:
-            if pd.isna(value):
-                return None
-        except (TypeError, ValueError):
-            pass
-
-        # Handle floats such as NaN / Infinity
-        if isinstance(value, float):
-
-            if not math.isfinite(value):
-                return None
-
-            return value
-
-        # Handle Pandas numeric values
-        if hasattr(value, "item"):
-
-            try:
-                converted = value.item()
-
-                if isinstance(converted, float):
-                    if not math.isfinite(converted):
-                        return None
-
-                return converted
-
-            except (ValueError, TypeError):
-                pass
-
-        return value
-
-    # ==========================================================
-    # Convert DataFrame into JSON-safe records
-    # ==========================================================
-
-    @classmethod
-    def dataframe_to_records(cls, df):
-
-        records = df.to_dict(
-            orient="records"
-        )
-
-        return cls.make_json_safe(
-            records
-        )
-
-    # ==========================================================
-    # Base case query
-    # ==========================================================
-
-    CASE_BASE = """
-        WITH CASE_BASE AS (
-            SELECT
-                C.CASE_ID,
-                C.CASE_NUMBER,
-                C.DATE_OPENED,
-                C.DATE_RESOLVED,
-
-                NULLIF(
-                    LTRIM(RTRIM(C.ASSIGNED_TO)),
-                    ''
-                ) AS ASSIGNED_TO,
-
-                COALESCE(
-                    NULLIF(
-                        UPPER(
-                            LTRIM(
-                                RTRIM(C.STATUS)
-                            )
-                        ),
-                        ''
-                    ),
-                    'UNASSIGNED'
-                ) AS STATUS,
-
-                COALESCE(
-                    NULLIF(
-                        LTRIM(
-                            RTRIM(
-                                JSON_VALUE(
-                                    CASE
-                                        WHEN ISJSON(
-                                            C.MODUS_OPERANDI
-                                        ) = 1
-                                        THEN C.MODUS_OPERANDI
-                                        ELSE '{}'
-                                    END,
-                                    '$.A_offence'
-                                )
-                            )
-                        ),
-                        ''
-                    ),
-                    'UNSPECIFIED'
-                ) AS CASE_TYPE
-
-            FROM CASES C
-        )
-    """
-
-    # ==========================================================
-    # GET
-    # ==========================================================
-
-    def get(self):
-
-        try:
-
-            action = (
-                request.args.get("action")
-                or "overview"
-            ).lower()
-
-            # ======================================================
-            # OVERVIEW
-            # ======================================================
-
-            if action == "overview":
-
-                query = self.CASE_BASE + """
-
-                    SELECT
-
-                        COUNT(*) AS total_cases,
-
-                        SUM(
-                            CASE
-                                WHEN STATUS <> 'RESOLVED'
-                                THEN 1
-                                ELSE 0
-                            END
-                        ) AS active_cases,
-
-                        SUM(
-                            CASE
-                                WHEN STATUS = 'UNASSIGNED'
-                                THEN 1
-                                ELSE 0
-                            END
-                        ) AS unassigned_cases,
-
-                        SUM(
-                            CASE
-                                WHEN STATUS = 'ASSIGNED'
-                                THEN 1
-                                ELSE 0
-                            END
-                        ) AS assigned_cases,
-
-                        SUM(
-                            CASE
-                                WHEN STATUS = 'RESOLVED'
-                                THEN 1
-                                ELSE 0
-                            END
-                        ) AS resolved_cases,
-
-                        CAST(
-                            100.0 *
-                            SUM(
-                                CASE
-                                    WHEN STATUS = 'RESOLVED'
-                                    THEN 1
-                                    ELSE 0
-                                END
-                            )
-                            /
-                            NULLIF(
-                                COUNT(*),
-                                0
-                            )
-                            AS DECIMAL(10, 1)
-                        ) AS resolution_rate,
-
-                        CAST(
-                            AVG(
-                                CASE
-                                    WHEN STATUS <> 'RESOLVED'
-                                    THEN DATEDIFF(
-                                        DAY,
-                                        DATE_OPENED,
-                                        GETDATE()
-                                    )
-                                END
-                            )
-                            AS DECIMAL(10, 1)
-                        ) AS avg_active_age_days,
-
-                        CAST(
-                            AVG(
-                                CASE
-                                    WHEN STATUS = 'RESOLVED'
-                                    AND DATE_RESOLVED IS NOT NULL
-                                    THEN DATEDIFF(
-                                        DAY,
-                                        DATE_OPENED,
-                                        DATE_RESOLVED
-                                    )
-                                END
-                            )
-                            AS DECIMAL(10, 1)
-                        ) AS avg_resolution_days
-
-                    FROM CASE_BASE
-                """
-
-                df = pd.read_sql(
-                    query,
-                    engine
-                )
-
-                data = (
-                    df.to_dict(
-                        orient="records"
-                    )[0]
-                )
-
-                data = self.make_json_safe(
-                    data
-                )
-
-                return {
-                    "success": True,
-                    "action": "overview",
-                    "data": data,
-                }, 200
-
-            # ======================================================
-            # CASE STATUS
-            # ======================================================
-
-            elif action == "case_status":
-
-                query = self.CASE_BASE + """
-
-                    SELECT
-                        STATUS AS label,
-                        COUNT(*) AS total
-
-                    FROM CASE_BASE
-
-                    GROUP BY STATUS
-
-                    ORDER BY
-                        CASE STATUS
-                            WHEN 'UNASSIGNED'
-                                THEN 1
-
-                            WHEN 'ASSIGNED'
-                                THEN 2
-
-                            WHEN 'RESOLVED'
-                                THEN 3
-
-                            ELSE 4
-                        END
-                """
-
-                df = pd.read_sql(
-                    query,
-                    engine
-                )
-
-                data = self.dataframe_to_records(
-                    df
-                )
-
-                return {
-                    "success": True,
-                    "action": "case_status",
-                    "data": data,
-                }, 200
-
-            # ======================================================
-            # CASE TYPES
-            # ======================================================
-
-            elif action == "case_types":
-
-                query = self.CASE_BASE + """
-
-                    SELECT
-
-                        CASE_TYPE AS label,
-
-                        COUNT(*) AS total,
-
-                        SUM(
-                            CASE
-                                WHEN STATUS <> 'RESOLVED'
-                                THEN 1
-                                ELSE 0
-                            END
-                        ) AS active_cases,
-
-                        SUM(
-                            CASE
-                                WHEN STATUS = 'RESOLVED'
-                                THEN 1
-                                ELSE 0
-                            END
-                        ) AS resolved_cases,
-
-                        CAST(
-                            100.0 *
-                            SUM(
-                                CASE
-                                    WHEN STATUS = 'RESOLVED'
-                                    THEN 1
-                                    ELSE 0
-                                END
-                            )
-                            /
-                            NULLIF(
-                                COUNT(*),
-                                0
-                            )
-                            AS DECIMAL(10, 1)
-                        ) AS resolution_rate
-
-                    FROM CASE_BASE
-
-                    GROUP BY CASE_TYPE
-
-                    ORDER BY
-                        total DESC,
-                        CASE_TYPE
-                """
-
-                df = pd.read_sql(
-                    query,
-                    engine
-                )
-
-                data = self.dataframe_to_records(
-                    df
-                )
-
-                return {
-                    "success": True,
-                    "action": "case_types",
-                    "data": data,
-                }, 200
-
-            # ======================================================
-            # CASE TRENDS
-            # ======================================================
-
-            # ==========================================================
-# Bar chart: cases opened vs resolved over the recent 6 months
-# GET /analytics?action=trends
-# ==========================================================
-
-# ==========================================================
-# Bar chart: cases opened vs resolved over the recent 6 months
-# GET /analytics?action=trends
-# ==========================================================
-            elif action == "trends":
-                query = self.CASE_BASE + """
-                    ,
-                    MONTH_OFFSETS AS (
-                        SELECT 0 AS month_offset
-                        UNION ALL SELECT 1
-                        UNION ALL SELECT 2
-                        UNION ALL SELECT 3
-                        UNION ALL SELECT 4
-                        UNION ALL SELECT 5
-                    ),
-
-                    MONTH_LIST AS (
-                        SELECT
-                            DATEADD(
-                                MONTH,
-                                -month_offset,
-                                DATEFROMPARTS(
-                                    YEAR(GETDATE()),
-                                    MONTH(GETDATE()),
-                                    1
-                                )
-                            ) AS month_start
-                        FROM MONTH_OFFSETS
-                    )
-
-                    SELECT
-                        CONVERT(char(7), M.month_start, 120) AS period,
-
-                        COUNT(
-                            CASE
-                                WHEN C.DATE_OPENED >= M.month_start
-                                AND C.DATE_OPENED < DATEADD(
-                                    MONTH,
-                                    1,
-                                    M.month_start
-                                )
-                                THEN 1
-                            END
-                        ) AS opened,
-
-                        COUNT(
-                            CASE
-                                WHEN C.DATE_RESOLVED >= M.month_start
-                                AND C.DATE_RESOLVED < DATEADD(
-                                    MONTH,
-                                    1,
-                                    M.month_start
-                                )
-                                THEN 1
-                            END
-                        ) AS resolved
-
-                    FROM MONTH_LIST M
-
-                    LEFT JOIN CASE_BASE C
-                        ON (
-                            (
-                                C.DATE_OPENED >= M.month_start
-                                AND C.DATE_OPENED < DATEADD(
-                                    MONTH,
-                                    1,
-                                    M.month_start
-                                )
-                            )
-                            OR
-                            (
-                                C.DATE_RESOLVED >= M.month_start
-                                AND C.DATE_RESOLVED < DATEADD(
-                                    MONTH,
-                                    1,
-                                    M.month_start
-                                )
-                            )
-                        )
-
-                    GROUP BY M.month_start
-
-                    ORDER BY M.month_start
-                """
-
-                df = pd.read_sql(query, engine)
-                data = df.to_dict(orient="records")
-
-                return {
-                    "success": True,
-                    "action": "trends",
-                    "data": data
-                }, 200
-
-            # ======================================================
-            # CASE AGING
-            # ======================================================
-
-            elif action == "aging":
-
-                query = self.CASE_BASE + """
-
-                    SELECT
-
-                        CASE
-
-                            WHEN DATEDIFF(
-                                DAY,
-                                DATE_OPENED,
-                                GETDATE()
-                            ) <= 7
-                            THEN '0-7 days'
-
-                            WHEN DATEDIFF(
-                                DAY,
-                                DATE_OPENED,
-                                GETDATE()
-                            ) <= 30
-                            THEN '8-30 days'
-
-                            WHEN DATEDIFF(
-                                DAY,
-                                DATE_OPENED,
-                                GETDATE()
-                            ) <= 60
-                            THEN '31-60 days'
-
-                            WHEN DATEDIFF(
-                                DAY,
-                                DATE_OPENED,
-                                GETDATE()
-                            ) <= 90
-                            THEN '61-90 days'
-
-                            ELSE '90+ days'
-
-                        END AS label,
-
-                        COUNT(*) AS total
-
-                    FROM CASE_BASE
-
-                    WHERE STATUS <> 'RESOLVED'
-
-                    GROUP BY
-
-                        CASE
-
-                            WHEN DATEDIFF(
-                                DAY,
-                                DATE_OPENED,
-                                GETDATE()
-                            ) <= 7
-                            THEN '0-7 days'
-
-                            WHEN DATEDIFF(
-                                DAY,
-                                DATE_OPENED,
-                                GETDATE()
-                            ) <= 30
-                            THEN '8-30 days'
-
-                            WHEN DATEDIFF(
-                                DAY,
-                                DATE_OPENED,
-                                GETDATE()
-                            ) <= 60
-                            THEN '31-60 days'
-
-                            WHEN DATEDIFF(
-                                DAY,
-                                DATE_OPENED,
-                                GETDATE()
-                            ) <= 90
-                            THEN '61-90 days'
-
-                            ELSE '90+ days'
-
-                        END
-
-                    ORDER BY
-                        MIN(
-                            DATEDIFF(
-                                DAY,
-                                DATE_OPENED,
-                                GETDATE()
-                            )
-                        )
-                """
-
-                df = pd.read_sql(
-                    query,
-                    engine
-                )
-
-                data = self.dataframe_to_records(
-                    df
-                )
-
-                return {
-                    "success": True,
-                    "action": "aging",
-                    "data": data,
-                }, 200
-
-            # ======================================================
-            # DETECTIVE WORKLOAD
-            # ======================================================
-
-            elif action == "workload":
-
-                query = self.CASE_BASE + """
-
-                    , DETECTIVE_WORKLOAD AS (
-
-                        SELECT
-
-                            E.EMPLOYEE_NUMBER,
-
-                            E.NAME + ' ' +
-                            E.SURNAME AS detective,
-
-                            COUNT(
-                                CASE
-                                    WHEN C.STATUS <>
-                                        'RESOLVED'
-                                    THEN 1
-                                END
-                            ) AS active_cases,
-
-                            COUNT(
-                                CASE
-                                    WHEN C.STATUS =
-                                        'RESOLVED'
-                                    THEN 1
-                                END
-                            ) AS resolved_cases,
-
-                            COUNT(
-                                C.CASE_ID
-                            ) AS total_cases
-
-                        FROM EMPLOYEES E
-
-                        LEFT JOIN CASE_BASE C
-
-                            ON C.ASSIGNED_TO =
-                               E.EMPLOYEE_NUMBER
-
-                        WHERE
-                            UPPER(
-                                LTRIM(
-                                    RTRIM(E.RANKS)
-                                )
-                            ) = 'DETECTIVE'
-
-                        GROUP BY
-
-                            E.EMPLOYEE_NUMBER,
-                            E.NAME,
-                            E.SURNAME
-                    )
-
-                    SELECT
-
-                        EMPLOYEE_NUMBER,
-
-                        detective,
-
-                        active_cases,
-
-                        resolved_cases,
-
-                        total_cases,
-
-                        CASE
-
-                            WHEN active_cases = 0
-                            THEN 'LOW'
-
-                            WHEN active_cases >
-                                (
-                                    SELECT
-                                        AVG(
-                                            CAST(
-                                                active_cases
-                                                AS DECIMAL(10, 1)
-                                            )
-                                        ) * 1.5
-
-                                    FROM DETECTIVE_WORKLOAD
-                                )
-
-                            THEN 'HIGH'
-
-                            ELSE 'NORMAL'
-
-                        END AS workload_level
-
-                    FROM DETECTIVE_WORKLOAD
-
-                    ORDER BY
-                        active_cases DESC,
-                        detective
-                """
-
-                df = pd.read_sql(
-                    query,
-                    engine
-                )
-
-                data = self.dataframe_to_records(
-                    df
-                )
-
-                return {
-                    "success": True,
-                    "action": "workload",
-                    "data": data,
-                }, 200
-
-            # ======================================================
-            # DETECTIVE RESOLUTION PERFORMANCE
-            # ======================================================
-
-            elif action == "resolution_performance":
-
-                query = self.CASE_BASE + """
-
-                    SELECT
-
-                        E.EMPLOYEE_NUMBER,
-
-                        E.NAME + ' ' +
-                        E.SURNAME AS detective,
-
-                        COUNT(
-                            C.CASE_ID
-                        ) AS total_cases,
-
-                        SUM(
-                            CASE
-                                WHEN C.STATUS =
-                                    'RESOLVED'
-                                THEN 1
-                                ELSE 0
-                            END
-                        ) AS resolved_cases,
-
-                        CAST(
-                            100.0 *
-                            SUM(
-                                CASE
-                                    WHEN C.STATUS =
-                                        'RESOLVED'
-                                    THEN 1
-                                    ELSE 0
-                                END
-                            )
-                            /
-                            NULLIF(
-                                COUNT(
-                                    C.CASE_ID
-                                ),
-                                0
-                            )
-                            AS DECIMAL(10, 1)
-                        ) AS resolution_rate,
-
-                        CAST(
-                            AVG(
-                                CASE
-                                    WHEN C.STATUS =
-                                        'RESOLVED'
-
-                                    AND C.DATE_RESOLVED
-                                        IS NOT NULL
-
-                                    THEN DATEDIFF(
-                                        DAY,
-                                        C.DATE_OPENED,
-                                        C.DATE_RESOLVED
-                                    )
-                                END
-                            )
-                            AS DECIMAL(10, 1)
-                        ) AS avg_resolution_days
-
-                    FROM EMPLOYEES E
-
-                    INNER JOIN CASE_BASE C
-
-                        ON C.ASSIGNED_TO =
-                           E.EMPLOYEE_NUMBER
-
-                    WHERE
-                        UPPER(
-                            LTRIM(
-                                RTRIM(E.RANKS)
-                            )
-                        ) = 'DETECTIVE'
-
-                    GROUP BY
-
-                        E.EMPLOYEE_NUMBER,
-                        E.NAME,
-                        E.SURNAME
-
-                    ORDER BY
-                        resolution_rate DESC,
-                        resolved_cases DESC
-                """
-
-                df = pd.read_sql(
-                    query,
-                    engine
-                )
-
-                data = self.dataframe_to_records(
-                    df
-                )
-
-                return {
-                    "success": True,
-                    "action":
-                        "resolution_performance",
-                    "data": data,
-                }, 200
-
-            # ======================================================
-            # CASES REQUIRING ATTENTION
-            # ======================================================
-
-            elif action == "attention_cases":
-
-                query = self.CASE_BASE + """
-
-                    SELECT TOP 10
-
-                        C.CASE_NUMBER
-                            AS case_number,
-
-                        C.CASE_TYPE
-                            AS case_type,
-
-                        C.STATUS
-                            AS status,
-
-                        C.ASSIGNED_TO
-                            AS assigned_to,
-
-                        E.NAME + ' ' +
-                        E.SURNAME
-                            AS detective,
-
-                        DATEDIFF(
-                            DAY,
-                            C.DATE_OPENED,
-                            GETDATE()
-                        ) AS days_open,
-
-                        CASE
-
-                            WHEN C.STATUS =
-                                'UNASSIGNED'
-
-                            THEN
-                                'Unassigned backlog'
-
-                            ELSE
-                                'Critical case age'
-
-                        END AS reason
-
-                    FROM CASE_BASE C
-
-                    LEFT JOIN EMPLOYEES E
-
-                        ON E.EMPLOYEE_NUMBER =
-                           C.ASSIGNED_TO
-
-                    WHERE
-                        C.STATUS <> 'RESOLVED'
-
-                    AND (
-
-                        DATEDIFF(
-                            DAY,
-                            C.DATE_OPENED,
-                            GETDATE()
-                        ) > 90
-
-                        OR (
-
-                            C.STATUS =
-                                'UNASSIGNED'
-
-                            AND
-
-                            DATEDIFF(
-                                DAY,
-                                C.DATE_OPENED,
-                                GETDATE()
-                            ) > 7
-
-                        )
-
-                    )
-
-                    ORDER BY
-
-                        DATEDIFF(
-                            DAY,
-                            C.DATE_OPENED,
-                            GETDATE()
-                        ) DESC
-                """
-
-                df = pd.read_sql(
-                    query,
-                    engine
-                )
-
-                data = self.dataframe_to_records(
-                    df
-                )
-
-                return {
-                    "success": True,
-                    "action":
-                        "attention_cases",
-                    "data": data,
-                }, 200
-
-            # ======================================================
-            # COMMANDER INSIGHTS
-            # ======================================================
-
-            elif action == "insights":
-
-                query = self.CASE_BASE + """
-
-                    SELECT
-
-                        SUM(
-                            CASE
-                                WHEN STATUS =
-                                    'UNASSIGNED'
-                                THEN 1
-                                ELSE 0
-                            END
-                        ) AS unassigned_cases,
-
-                        SUM(
-                            CASE
-
-                                WHEN STATUS <>
-                                    'RESOLVED'
-
-                                AND DATEDIFF(
-                                    DAY,
-                                    DATE_OPENED,
-                                    GETDATE()
-                                ) > 90
-
-                                THEN 1
-
-                                ELSE 0
-
-                            END
-                        ) AS critical_aging_cases,
-
-                        CAST(
-
-                            100.0 *
-
-                            SUM(
-                                CASE
-                                    WHEN STATUS =
-                                        'RESOLVED'
-                                    THEN 1
-                                    ELSE 0
-                                END
-                            )
-
-                            /
-
-                            NULLIF(
-                                COUNT(*),
-                                0
-                            )
-
-                            AS DECIMAL(10, 1)
-
-                        ) AS resolution_rate
-
-                    FROM CASE_BASE
-                """
-
-                df = pd.read_sql(
-                    query,
-                    engine
-                )
-
-                summary = (
-                    df.to_dict(
-                        orient="records"
-                    )[0]
-                )
-
-                summary = self.make_json_safe(
-                    summary
-                )
-
-                insights = []
-
-                unassigned_cases = (
-                    summary.get(
-                        "unassigned_cases"
-                    ) or 0
-                )
-
-                critical_aging_cases = (
-                    summary.get(
-                        "critical_aging_cases"
-                    ) or 0
-                )
-
-                resolution_rate = (
-                    summary.get(
-                        "resolution_rate"
-                    )
-                )
-
-                if unassigned_cases > 0:
-
-                    insights.append(
-                        f"{unassigned_cases} "
-                        "case(s) are currently "
-                        "unassigned."
-                    )
-
-                if critical_aging_cases > 0:
-
-                    insights.append(
-                        f"{critical_aging_cases} "
-                        "unresolved case(s) "
-                        "have been open for "
-                        "more than 90 days."
-                    )
-
-                if (
-                    resolution_rate is not None
-                    and resolution_rate < 30
-                ):
-
-                    insights.append(
-                        f"The overall resolution "
-                        f"rate is "
-                        f"{resolution_rate}%, "
-                        "which requires attention."
-                    )
-
-                if not insights:
-
-                    insights.append(
-                        "No immediate "
-                        "assignment, aging, "
-                        "or resolution alert "
-                        "was identified."
-                    )
-
-                return {
-                    "success": True,
-                    "action": "insights",
-                    "data": insights,
-                }, 200
-
-            # ======================================================
-            # INVALID ACTION
-            # ======================================================
-
-            else:
-
-                return {
-                    "success": False,
-                    "message":
-                        "Invalid analytics action.",
-                }, 400
-
-        # ==========================================================
-        # DATABASE ERROR
-        # ==========================================================
-
-        except SQLAlchemyError as e:
-
-            return {
-                "success": False,
-                "message":
-                    f"Database Error: {str(e)}",
-            }, 500
-
-        # ==========================================================
-        # GENERAL ERROR
-        # ==========================================================
-
-        except Exception as e:
-
-            return {
-                "success": False,
-                "message": str(e),
-            }, 500
-
 # ==========================================================
 # Application Entry Point
 # ==========================================================
@@ -2392,7 +1306,6 @@ class CommanderAnalytics(Resource):
 try:
     api.add_resource(EmployeeDetails, '/employees')
     api.add_resource(Cases, '/cases')
-    api.add_resource(CommanderAnalytics, '/analytics')
     if __name__ == '__main__':
         hostsite.run(host="0.0.0.0", port=5000, debug=True)
 except firebase_exceptions.FirebaseError as e:
