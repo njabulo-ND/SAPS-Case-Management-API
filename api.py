@@ -1084,7 +1084,7 @@ try:
                                 INSERT INTO CASES(P21,VICTIM,VICTIM_EMAIL,STATUS)
                                 OUTPUT INSERTED.CASE_NUMBER
                                 VALUES
-                                (:p21,:victim,:initials,'ACTIVE');
+                                (:p21,:victim,:initials,'UNASSIGNED');
                         """
                     with engine.connect() as conn:
                         result = conn.execute(
