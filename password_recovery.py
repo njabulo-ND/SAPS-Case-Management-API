@@ -19,15 +19,17 @@ otp_store = {}
 
 otp_store ={}
 def check_employee_and_sendotp(emp_no):
-    doc_ref = firebase_db.collection('employees').document(emp_no)
-    doc = doc_ref.get()
+    doc = firebase_db.collection('employees').document(emp_no).get()
     if doc.exists:
+        api.save_json_data({"employee":'exist'})
         data = doc.to_dict()
         email = data.get('email')
         otp = api.send_otp_email(email)
+        return otp
     else:
+        api.save_json_data({"employee":'Doesnt exist'})
         return {"employee":'Doesnt exist'}
-    return otp
+    
 
 def verify_otp(emp_no,otp_from_user):
     stored = otp_store.get(emp_no)
