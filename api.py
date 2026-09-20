@@ -951,7 +951,11 @@ try:
                 action = request.args.get('action')
                 if action.lower() == "case_list":
                     query = """
+<<<<<<< HEAD
                                 SELECT VICTIM,STATEMENT_FORM,MODUS_OPERANDI,FORMAT(DATE_OPENED, 'yyyy-MM-dd HH:mm') AS DATE_OPENED,P21,CASE_NUMBER,STATUS,ASSIGNED_TO
+=======
+                                SELECT CASE_ID,ASSIGNED_TO,VICTIM,STATEMENT_FORM,MODUS_OPERANDI,FORMAT(DATE_OPENED, 'yyyy-MM-dd HH:mm') AS DATE_OPENED,P21,CASE_NUMBER,STATUS
+>>>>>>> Nkonzo
                                 FROM CASES;"""
                     df = pd.read_sql(query, engine)
                     data = df.to_dict(orient='records')
@@ -2490,6 +2494,27 @@ class Investigation(Resource):
                         return {'status': 'resolved'}
                     else:
                         return {'status': 'not resolved'}
+
+                elif data.get('action').lower() == 'reopen':
+                    case_id = data.get('caseId')
+                    query = """
+                                UPDATE CASES
+                                SET STATUS = 'ASSIGNED', DATE_RESOLVED = NULL
+                                WHERE CASE_ID = :case_id
+                                """
+                    with engine.connect() as conn:
+                        result = conn.execute(
+                            text(query), {'case_id': case_id})
+                        conn.commit()
+                        rows_updated = result.rowcount
+
+                    save_json_data({'rows': rows_updated, 'case_id': case_id, 'status': 'reopened'})
+
+                    if rows_updated > 0:
+                        return {'status': 'reopened'}
+                    else:
+                        return {'status': 'not reopened'}
+
                 else:
                     return {'status': 'not added'}
 
