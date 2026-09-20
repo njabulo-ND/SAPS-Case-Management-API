@@ -868,7 +868,7 @@ try:
 
                 if not password or not employee_id:
                     save_json_data(
-                        {'problem': 'password or employee id not added'})
+                        {'problem': 'password or employee id not from front ent added'})
                     return {'error': 'Invalid data,password and id not added'}
 
                 else:
