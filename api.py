@@ -951,11 +951,7 @@ try:
                 action = request.args.get('action')
                 if action.lower() == "case_list":
                     query = """
-<<<<<<< HEAD
-                                SELECT VICTIM,STATEMENT_FORM,MODUS_OPERANDI,FORMAT(DATE_OPENED, 'yyyy-MM-dd HH:mm') AS DATE_OPENED,P21,CASE_NUMBER,STATUS,ASSIGNED_TO
-=======
                                 SELECT CASE_ID,ASSIGNED_TO,VICTIM,STATEMENT_FORM,MODUS_OPERANDI,FORMAT(DATE_OPENED, 'yyyy-MM-dd HH:mm') AS DATE_OPENED,P21,CASE_NUMBER,STATUS
->>>>>>> Nkonzo
                                 FROM CASES;"""
                     df = pd.read_sql(query, engine)
                     data = df.to_dict(orient='records')
