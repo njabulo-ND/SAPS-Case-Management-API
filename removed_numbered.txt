@@ -1,0 +1,61 @@
+﻿20: from datetime import datetime, timedelta
+21: import password_recovery
+277:         A list of diary entries describing what happened. Include ONE entry
+278:         containing:
+415:         was opened (e.g. robbery, assault, theft,etc) for robbery ralated cases just say robbery dont specify
+416:         what type of it just write robbery.
+786:                             otp_store[employee_id] = {'otp': otp,
+787:                                                       'expiry': datetime.now() + timedelta(minutes=5)
+788:                                                       }
+809:                                 otp_store[employee_id] = {'otp': otp,
+810:                                                           'expiry': datetime.now() + timedelta(minutes=5)
+811:                                                           }
+830:                     if stored_otp:
+831:                         if datetime.now() > stored_otp.get('expiry'):
+832:                             save_json_data({'forgot password otp': 'expired'})
+833:                             return {'status': 'time out'}
+834:                         if otp_from_user == stored_otp.get('otp'):
+835:                             doc = firebase_db.collection(
+836:                                 'employees').document(employee_id).get()
+837:                             save_json_data({'otp': 'verified'})
+838:                             return {doc.id: doc.to_dict(), 'status': 'verified'}
+839: 
+840:                         else:
+841:                             return {'status': 'invalid_otp'}
+843:                         return {'Status': 'Employee number not found'}
+844: 
+845:                 if action == 'forgotPassword_otp':
+846:                     otp = password_recovery.check_employee_and_sendotp(
+847:                         employee_id)
+848:                     if isinstance(otp,str) and otp.isdigit():
+849:                         otp_store[employee_id] = {'otp': otp,
+850:                                                   'expiry': datetime.now() + timedelta(minutes=5)
+851:                                                   }
+852:                         save_json_data({'otp for forgot password': 'sent'})
+853:                         return {'status': 'sent'}
+854:                     else:
+855:                         save_json_data({'status':f'not found or otp not digit {otp}'})
+856:                         return {'status':'unavailable'}
+915:                 save_json_data(
+916:                             {'data sent': f'{data}'})
+921:                 password = data.get('Password')
+922:                 employee_id = data.get('Employee_id')
+924:                 if not password:
+926:                         {'problem': 'password not added'})
+927:                     return {'error': 'Invalid data,password added'}
+928: 
+929:                 elif not employee_id:
+930:                     save_json_data(
+931:                         {'problem': 'employee id not added'})
+932:                     return {'error': 'Invalid data,id not added'}
+1025:                                 SELECT VICTIM,STATEMENT_FORM,MODUS_OPERANDI,FORMAT(DATE_OPENED, 'yyyy-MM-dd HH:mm') AS DATE_OPENED,P21,CASE_NUMBER,STATUS
+1027:                                 WHERE ASSIGNED_TO = ?;"""
+1116:                         f"SAPS Case Management System"
+1211:                             # Changing the status of the case after assignement
+1214:                                         SET STATUS = 'IN PROGRESS'
+1223:                             save_json_data(
+1224:                                 {'Status change to in progress row count': another_rows_updated})
+1226:                             # Finding information of the assigned case
+1256:                                     f"{surname} for investigation.\n\nCase Status: In Progress\n\n"
+1270:                                     {'victim': F'emailed for case {case_number} assigned to {name}'})
+1324:     print(f"Firebase Error: {e}")
