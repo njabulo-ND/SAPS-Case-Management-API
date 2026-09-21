@@ -19,6 +19,8 @@ from google.genai import errors
 from google.genai import types
 import math
 import time
+from datetime import datetime, timedelta
+import password_recovery
 
 
 load_dotenv()
@@ -678,7 +680,6 @@ def fill_all_forms(p21_form, case_number):
 # ==========================================================
 otp = ''
 otp_store = {}
-
 # Employees end point
 try:
     class EmployeeDetails(Resource):
@@ -754,7 +755,9 @@ try:
                         if doc.exists:
                             otp = send_otp_email(
                                 empty_dict[employee_id].get('email'))
-                            otp_store[employee_id] = otp
+                            otp_store[employee_id] = {'otp': otp,
+                                                      'expiry': datetime.now() + timedelta(minutes=5)
+                                                      }
                             save_json_data(
                                 {'data': f'sent to firebase and email {empty_dict[employee_id].get('email')}\nOtp {otp_store[employee_id]}'})
                             empty_dict.update({'status': 'found'})
@@ -775,7 +778,9 @@ try:
                             if firebase_password == user_password:
                                 otp = send_otp_email(
                                     doc.to_dict().get('email'))
-                                otp_store[employee_id] = otp
+                                otp_store[employee_id] = {'otp': otp,
+                                                          'expiry': datetime.now() + timedelta(minutes=5)
+                                                          }
                                 save_json_data(
                                     {'otp sent': f'otp sent to {doc.to_dict().get('email')} with otp:{otp_store[employee_id]}'})
                                 return {doc.id: doc.to_dict(), 'status': 'otp_sent'}
@@ -794,12 +799,33 @@ try:
 
                 if action == 'verify_otp':
                     stored_otp = otp_store.get(employee_id)
-                    if otp_from_user == stored_otp:
-                        doc = firebase_db.collection(
-                            'employees').document(employee_id).get()
-                        return {doc.id: doc.to_dict(), 'status': 'verified'}
+                    if stored_otp:
+                        if datetime.now() > stored_otp.get('expiry'):
+                            save_json_data({'forgot password otp': 'expired'})
+                            return {'status': 'time out'}
+                        if otp_from_user == stored_otp.get('otp'):
+                            doc = firebase_db.collection(
+                                'employees').document(employee_id).get()
+                            save_json_data({'otp': 'verified'})
+                            return {doc.id: doc.to_dict(), 'status': 'verified'}
+
+                        else:
+                            return {'status': 'invalid_otp'}
                     else:
-                        return {'status': 'invalid_otp'}
+                        return {'Status': 'Employee number not found'}
+
+                if action == 'forgotPassword_otp':
+                    otp = password_recovery.check_employee_and_sendotp(
+                        employee_id)
+                    if isinstance(otp,str) and otp.isdigit():
+                        otp_store[employee_id] = {'otp': otp,
+                                                  'expiry': datetime.now() + timedelta(minutes=5)
+                                                  }
+                        save_json_data({'otp for forgot password': 'sent'})
+                        return {'status': 'sent'}
+                    else:
+                        save_json_data({'status':f'not found or otp not digit {otp}'})
+                        return {'status':'unavailable'}
 
                 if action.lower() == 'filter':
                     if rank and case_type:
@@ -858,18 +884,24 @@ try:
             # ==========================================================
             try:
                 data = request.get_json()
-
+                save_json_data(
+                            {'data sent': f'{data}'})
                 if not data:
                     save_json_data({'data': 'data not sent'})
                     return {'error': 'Invalid data you should send json data'}
 
-                password = data.get('password')
-                employee_id = data.get('employee_id')
+                password = data.get('Password')
+                employee_id = data.get('Employee_id')
 
-                if not password or not employee_id:
+                if not password:
                     save_json_data(
-                        {'problem': 'password or employee id not added'})
-                    return {'error': 'Invalid data,password and id not added'}
+                        {'problem': 'password not added'})
+                    return {'error': 'Invalid data,password added'}
+
+                elif not employee_id:
+                    save_json_data(
+                        {'problem': 'employee id not added'})
+                    return {'error': 'Invalid data,id not added'}
 
                 else:
                     doc = firebase_db.collection(
