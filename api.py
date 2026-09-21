@@ -695,6 +695,7 @@ try:
             #
             # 2. Login:
             #    - Authenticates employee using Firebase credentials.
+            #    - Overwrites the old password if the officer has forgotten password
             #
             # 3. Filter:
             #    - Searches employees using rank and case type.
@@ -952,7 +953,7 @@ except urllib.error.URLError as e:
 #    - Retrieves cases assigned to a specific officer.
 #
 # 2. Case Creation:
-#    - Creates new cases using submitted P21 information.
+#    -Autofills other 3 forms using submitted P21 information.
 #    -AI Autofills
 #
 # 3. Case Updates:
@@ -1053,6 +1054,7 @@ try:
                     p21_form = json.dumps(data.get('p21'))
                     victim = data.get('victim')
                     email_of_the_victim = data.get('email')
+
                     # Sending p21 to SQL and returning casenumber
                     query = """
                                 INSERT INTO CASES(P21,VICTIM,VICTIM_EMAIL,STATUS)
@@ -1090,7 +1092,6 @@ try:
                     else:
                         return {"forms":"were not filled"}
 
-
                 #Activates if the front end personnel verifies the Autofilled Invistigation Diary to be true then it is sent to Database
                 elif data.get('investigationDiary'):
 
@@ -1106,7 +1107,7 @@ try:
                             conn.execute(
                                 text(query), {'diary': form, 'number': case_number})
                             conn.commit()
-                        save_json_data(data)
+                        save_json_data({'data sent to database':data})
                         return {'status': 'added'}
 
                     else:
@@ -1119,6 +1120,7 @@ try:
                     if data.get('caseNumber'):
                         form = json.dumps(data.get('modusOperandi'))
                         case_number = data.get('caseNumber')
+                        email_of_the_victim = data.get('email')
                         query = """
                                 UPDATE CASES
                                 SET MODUS_OPERANDI = :operandi
