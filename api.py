@@ -38,14 +38,15 @@ def run_gemini(client, model, contents, config, retries=5):
             err_msg = str(e)
             # Check if it's a temporary high demand (503) or rate limit (429)
             is_transient = "503" in err_msg or "429" in err_msg or "UNAVAILABLE" in err_msg or "high demand" in err_msg
-            
+
             if is_transient and i < retries - 1:
                 # Exponential backoff: waits 4s, 8s, 16s, 32s...
                 sleep_time = 4 * (2 ** i)
-                print(f"[Gemini 503 Spike] Model busy. Retrying attempt {i+1}/{retries} after {sleep_time}s...")
+                print(
+                    f"[Gemini 503 Spike] Model busy. Retrying attempt {i+1}/{retries} after {sleep_time}s...")
                 time.sleep(sleep_time)
                 continue
-            
+
             # If out of retries or it's a permanent error (e.g. 400 bad request), raise
             raise e
 
@@ -251,6 +252,8 @@ except Exception as e:
     print(f"Unexpected Error: {e}")
 
 # AI intergration to all forms
+
+
 def fill_all_forms(p21_form, case_number):
     try:
         api_key = os.environ["GEMINI_API_KEY"]
@@ -656,6 +659,7 @@ def fill_all_forms(p21_form, case_number):
     except Exception as e:
         return {"error": f"Unexpected Error: {e}"}
 
+
 # ==========================================================
 # Employee Management API
 # ==========================================================
@@ -818,15 +822,16 @@ try:
                 if action == 'forgotPassword_otp':
                     otp = password_recovery.check_employee_and_sendotp(
                         employee_id)
-                    if isinstance(otp,str) and otp.isdigit():
+                    if isinstance(otp, str) and otp.isdigit():
                         otp_store[employee_id] = {'otp': otp,
                                                   'expiry': datetime.now() + timedelta(minutes=5)
                                                   }
                         save_json_data({'otp for forgot password': 'sent'})
                         return {'status': 'sent'}
                     else:
-                        save_json_data({'status':f'not found or otp not digit {otp}'})
-                        return {'status':'unavailable'}
+                        save_json_data(
+                            {'status': f'not found or otp not digit {otp}'})
+                        return {'status': 'unavailable'}
 
                 if action.lower() == 'filter':
                     if rank and case_type:
@@ -886,7 +891,7 @@ try:
             try:
                 data = request.get_json()
                 save_json_data(
-                            {'data sent': f'{data}'})
+                    {'data sent': f'{data}'})
                 if not data:
                     save_json_data({'data': 'data not sent'})
                     return {'error': 'Invalid data you should send json data'}
@@ -1071,28 +1076,31 @@ try:
                     # AI autofilling
                     all_forms = fill_all_forms(
                         p21_form, case_number)
-                    
 
                     # Sending to where i ready the responses
-                    save_json_data({'response':all_forms})
-                    
-                    #Re-assigning for further use
+                    save_json_data({'response': all_forms})
+
+                    # Re-assigning for further use
                     all_forms_toDict = all_forms
 
-                    #taking out each form and converting it back to json
+                    # taking out each form and converting it back to json
                     if not all_forms_toDict.get('error'):
-                        modus_results = json.dumps(all_forms_toDict.get("modusOperandi"),indent=4)
-                        invistigation_diary_results = json.dumps(all_forms_toDict.get("investigationDiary"),indent=4)
-                        statement_results = json.dumps(all_forms_toDict.get( "statement"),indent=4)
-    
+                        modus_results = json.dumps(
+                            all_forms_toDict.get("modusOperandi"), indent=4)
+                        invistigation_diary_results = json.dumps(
+                            all_forms_toDict.get("investigationDiary"), indent=4)
+                        statement_results = json.dumps(
+                            all_forms_toDict.get("statement"), indent=4)
+
                         # Sending all the Autofilled forms to front end
-                        save_json_data({'response':invistigation_diary_results})
+                        save_json_data(
+                            {'response': invistigation_diary_results})
                         return {"caseNumber": case_number, 'investigationDiary': invistigation_diary_results, "modusOperandi": modus_results,
                                 "statement": statement_results}
                     else:
-                        return {"forms":"were not filled"}
+                        return {"forms": "were not filled"}
 
-                #Activates if the front end personnel verifies the Autofilled Invistigation Diary to be true then it is sent to Database
+                # Activates if the front end personnel verifies the Autofilled Invistigation Diary to be true then it is sent to Database
                 elif data.get('investigationDiary'):
 
                     if data.get('caseNumber'):
@@ -1107,7 +1115,7 @@ try:
                             conn.execute(
                                 text(query), {'diary': form, 'number': case_number})
                             conn.commit()
-                        save_json_data({'data sent to database':data})
+                        save_json_data({'data sent to database': data})
                         return {'status': 'added'}
 
                     else:
@@ -1145,7 +1153,8 @@ try:
                             f"SAPS JHB CENTRAL STATION"
                         )
                         sending_victim_email(case_message, email_of_the_victim)
-                        save_json_data({f'Email {email_of_the_victim}': 'Sent to victim'})
+                        save_json_data(
+                            {f'Email {email_of_the_victim}': 'Sent to victim'})
                         return {'status': 'added'}
 
                     else:
@@ -1167,7 +1176,7 @@ try:
                             conn.execute(
                                 text(query), {'statement': form, 'number': case_number})
                             conn.commit()
-                        save_json_data({'data sent to database':data})
+                        save_json_data({'data sent to database': data})
                         return {'status': 'added'}
 
                     else:
@@ -1177,120 +1186,275 @@ try:
                 # Assigning police to a case
                 if data.get('action'):
                     if data.get('action').lower() == 'assign':
-                        case_number = data.get('case_number')
-                        employee_number = data.get('employee_number')
-                        query = """
-                                UPDATE CASES
-                                SET ASSIGNED_TO = :employee_number
-                                WHERE CASE_NUMBER = :case_number
-                                """
-                        with engine.connect() as conn:
-                            result = conn.execute(
-                                text(query), {'employee_number': employee_number, 'case_number': case_number})
-                            conn.commit()
-                            rows_updated = result.rowcount
+                        case_number = str(data.get('case_number'))
+                        employee_number = str(data.get('employee_number'))
 
-                        # Writing to progress viewing file
-                        save_json_data({'rows': rows_updated, 'employee_number': employee_number,
-                                        'case_number': case_number})
+                        if case_number and employee_number:
 
-                        # Validating if the assignment was successful then updates the victim about the assignment
-                        if rows_updated > 0:
-                            # Changing the status of the case after assignement
+                            # Check whether the case is already assigned
                             query = """
-                                        UPDATE CASES
-                                        SET STATUS = 'ASSIGNED'
-                                        WHERE CASE_NUMBER = :case_number
-                                                            """
-                            with engine.connect() as conn:
-                                result = conn.execute(
-                                    text(query), {'case_number': case_number})
-                                conn.commit()
-                                another_rows_updated = result.rowcount
-
-                            save_json_data(
-                                {'Status change to assigned row count': another_rows_updated})
-
-                            # Generating the victim's magic link token for this case
-                            query = """
-                                        SELECT CASE_ID
-                                        FROM CASES
-                                        WHERE CASE_NUMBER = ?;"""
+                                    SELECT ASSIGNED_TO,STATUS,VICTIM_EMAIL
+                                    FROM CASES
+                                    WHERE CASE_NUMBER = ?;"""
                             df = pd.read_sql(
-                                query, engine, params=(str(case_number),))
-                            case_id_rows = df.to_dict(orient='records')
-
-                            case_log_link = None
-                            if case_id_rows:
-                                case_id = case_id_rows[0]['CASE_ID']
-                                victim_token = secrets.token_urlsafe(32)
-
-                                query = """
-                                            INSERT INTO VICTIM_ACCESS_TOKENS(CASE_ID,TOKEN)
-                                            VALUES
-                                            (:case_id,:token);
-                                    """
-                                with engine.connect() as conn:
-                                    conn.execute(
-                                        text(query), {'case_id': case_id, 'token': victim_token})
-                                    conn.commit()
-
-                                case_log_link = f"{BASE_URL}/case-log/{victim_token}"
+                                query, engine, params=(case_number,))
+                            data = df.to_dict(orient='records')
+                            if not data:
                                 save_json_data(
-                                    {'victim token generated for case_id': case_id})
+                                    {"Something happened": "The case was not found"})
+                                return {'': ''}, 500
 
-                            # Finding information of the assigned case
-                            query = """
-                                        SELECT E.NAME,E.SURNAME,E.RANKS,E.EMAIL,C.VICTIM_EMAIL
-                                        FROM EMPLOYEES E
-                                        JOIN CASES C ON E.EMPLOYEE_NUMBER = C.ASSIGNED_TO
-                                        WHERE C.CASE_NUMBER = ?;"""
-                            df = pd.read_sql(
-                                query, engine, params=(str(case_number),))
-                            employee_rows = df.to_dict(orient='records')
-
-                            # If Verify whether the information was found if yes then victim and officer are updated
-                            if employee_rows:
-                                row = employee_rows[0]
-                                name = row.get('NAME')
-                                surname = row.get('SURNAME')
-                                rank = row.get('RANKS')
-                                officer_email = row.get('EMAIL')
-                                victim_email = row.get('VICTIM_EMAIL')
-                                offMessage = (
-                                    f"Dear {rank} {name} {surname},\n\n"
-                                    f"This is to formally notify you that case number {case_number} has been "
-                                    f"assigned to you for investigation. Please log into the Case Management "
-                                    f"System at your earliest convenience to review the case details and "
-                                    f"proceed accordingly.\n\n"
-                                    f"Regards,\n"
-                                    f"SAPS Case Management System")
-                                victMessage = (
-                                    f"Dear Complainant,\n\n"
-                                    f"This message serves to inform you of an update regarding case number "
-                                    f"{case_number}. The case has been formally assigned to {rank} {name} "
-                                    f"{surname} for investigation.\n\nCase Status: Assigned\n\n"
-                                    f"Should you wish to make any enquiries regarding the progress of your "
-                                    f"case, you may contact the investigating officer directly via email at "
-                                    f"{officer_email}.\n\n"
-                                    f"You can view the ongoing progress of your case at any time using the "
-                                    f"link below:\n{case_log_link}\n\n"
-                                    f"Regards,\n"
-                                    f"SAPS Case Management System")
-
-                                # Emailing the officer about the assignement
-                                caseUpdate_email(offMessage, officer_email)
-                                save_json_data({'officer': 'emailed'})
-
-                                # Emailing the victim about the assignemnt
-                                caseUpdate_email(victMessage, victim_email)
-                                save_json_data(
-                                    {'victim': f'emailed for case {case_number} assigned to {name}'})
-                                return {'status': 'added'}
                             else:
-                                save_json_data({'victim': 'not emailed'})
+                                if data[0].get('STATUS') == 'ASSIGNED' and data[0].get('ASSIGNED_TO') is not None:
+                                    row = data[0]
+                                    status = row['STATUS']
+                                    old_officer_number = row['ASSIGNED_TO']
+                                    new_officer_number = employee_number
+                                    victim_email = row['VICTIM_EMAIL']
+                                    # Assigining new officer to the case
+                                    query = """
+                                                UPDATE CASES
+                                                SET ASSIGNED_TO = :new_officer_number
+                                                WHERE CASE_NUMBER = :case_number
+                                                                            """
+                                    with engine.connect() as conn:
+                                        result = conn.execute(
+                                            text(query), {'new_officer_number': new_officer_number, 'case_number': case_number})
+                                        conn.commit()
+                                        rows_updated = result.rowcount
+                                    save_json_data(
+                                        {"assigned done": f"rows_updated {rows_updated}"})
+                                    # this checks if the query got executed if it is it brings 1
+                                    if rows_updated > 0:
+
+                                        # Fetching officers details to update them
+                                        query = """
+                                                    SELECT EMPLOYEE_NUMBER,EMAIL,NAME,SURNAME,RANKS
+                                                    FROM EMPLOYEES
+                                                    WHERE EMPLOYEE_NUMBER IN (?,?);"""
+                                        df = pd.read_sql(
+                                            query, engine, params=(old_officer_number, new_officer_number,))
+                                        data = df.to_dict(orient='records')
+                                        old_officer_email = ''
+                                        new_officer_email = ''
+                                        old_officer_name = ''
+                                        new_officer_name = ''
+                                        new_officer_surname = ''
+                                        old_officer_surname = ''
+                                        new_officer_rank = ''
+                                        old_officer_rank = ''
+                                        if data:
+                                            for row in data:
+                                                if str(row['EMPLOYEE_NUMBER']) == str(old_officer_number):
+                                                    old_officer_email = row['EMAIL']
+                                                    old_officer_name = row['NAME']
+                                                    old_officer_surname = row['SURNAME']
+                                                    old_officer_rank = row['RANKS']
+                                                elif str(row['EMPLOYEE_NUMBER']) == str(new_officer_number):
+                                                    new_officer_email = row['EMAIL']
+                                                    new_officer_name = row['NAME']
+                                                    new_officer_surname = row['SURNAME']
+                                                    new_officer_rank = row['RANKS']
+                                                else:
+                                                    save_json_data(
+                                                        {"Something happened": "When assigning new & old officer information to variables "
+                                                        f"new = {new_officer_number}\nold = {old_officer_number}"})
+                                                    return {'': ''}, 500
+                                        else:
+                                            save_json_data(
+                                                {"Data is empty": "Did not fetch new and old officers details"})
+                                            return {'': ''}, 500
+
+                                        # Updates the old officer about the new assignement
+                                        if old_officer_email:
+                                            oldOfficerMessage = (
+                                                f"Dear {old_officer_rank} {old_officer_name} {old_officer_surname},\n\n"
+                                                f"This is to formally notify you that case number {case_number}, previously "
+                                                f"assigned to you, has been reassigned to {new_officer_rank} {new_officer_name} {new_officer_surname} "
+                                                f"for further investigation. You are no longer required to action this case. "
+                                                f"Should you have any relevant information or documentation pertaining to "
+                                                f"this case, please forward it to the newly assigned investigating officer.\n\n"
+                                                f"Regards,\n"
+                                                f"SAPS Case Management System")
+                                            caseUpdate_email(
+                                                oldOfficerMessage, old_officer_email)
+                                            save_json_data(
+                                                {"email SENT": f"old officer {old_officer_rank} {old_officer_name} {old_officer_surname}"})
+                                        else:
+                                            save_json_data(
+                                                {"old_officer_email": "nof found"})
+                                            return {'': ''}, 500
+
+                                        # Updates the  new officer about the new assignement
+                                        if new_officer_email:
+                                            newOfficerMessage = (
+                                                f"Dear {new_officer_rank} {new_officer_name} {new_officer_surname},\n\n"
+                                                f"This is to formally notify you that case number {case_number} has been "
+                                                f"reassigned to you for investigation. Please log into the Case Management "
+                                                f"System at your earliest convenience to review the case details and "
+                                                f"proceed accordingly.\n\n"
+                                                f"Regards,\n"
+                                                f"SAPS Case Management System")
+                                            caseUpdate_email(
+                                                newOfficerMessage, new_officer_email)
+                                            save_json_data(
+                                                {"Email sent": f"new officer {new_officer_rank} {new_officer_name} {new_officer_surname}"})
+                                        else:
+                                            save_json_data(
+                                                {"old_officer_email": "nof found"})
+                                            return {'': ''}, 500
+
+                                        # Updates the victim about the new assignement
+                                        if victim_email:
+                                            victimMessage = (
+                                                f"Dear Complainant,\n\n"
+                                                f"This is to inform you that your case, case number {case_number}, has been "
+                                                f"reassigned to {new_officer_rank} {new_officer_name} {new_officer_surname} for continued investigation."
+                                                f"officer {old_officer_rank} {old_officer_name} {old_officer_surname} has been replaced."
+                                                f"Please note this change for any future correspondence or enquiries regarding "
+                                                f"your case. The newly assigned officer will be in contact with you and can be "
+                                                f"reached via the Case Management System for any updates or questions you may "
+                                                f"have.\n\n"
+                                                f"Regards,\n"
+                                                f"SAPS Case Management System")
+                                            caseUpdate_email(
+                                                victimMessage, victim_email)
+                                            save_json_data(
+                                                {"email sent": "to victim"})
+                                        else:
+                                            save_json_data(
+                                                {"victim_email": "nof found"})
+                                            return {'': ''}, 500
+                                    else:
+                                        save_json_data(
+                                            {"Something happened": "Failed to assigned new officer and remove the old officer"})
+                                        return {'': ''}, 500
+                            # Runs if the case was not yet assigned to any officer
+                                else:
+                                    query = """
+                                            UPDATE CASES
+                                            SET ASSIGNED_TO = :employee_number
+                                            WHERE CASE_NUMBER = :case_number
+                                            """
+                                    with engine.connect() as conn:
+                                        result = conn.execute(
+                                            text(query), {'employee_number': employee_number, 'case_number': case_number})
+                                        conn.commit()
+                                        rows_updated = result.rowcount
+
+                                    # Writing to progress viewing file
+                                    save_json_data({'rows': rows_updated, 'employee_number': employee_number,
+                                                    'case_number': case_number})
+
+                                    # Validating if the assignment was successful then updates the victim about the assignment
+                                    if rows_updated > 0:
+                                        # Changing the status of the case after assignement
+                                        query = """
+                                                    UPDATE CASES
+                                                    SET STATUS = 'ASSIGNED'
+                                                    WHERE CASE_NUMBER = :case_number
+                                                                        """
+                                        with engine.connect() as conn:
+                                            result = conn.execute(
+                                                text(query), {'case_number': case_number})
+                                            conn.commit()
+                                            another_rows_updated = result.rowcount
+
+                                        save_json_data(
+                                            {'Status change to assigned row count': another_rows_updated})
+
+                                        # Generating the victim's magic link token for this case
+                                        query = """
+                                                    SELECT CASE_ID
+                                                    FROM CASES
+                                                    WHERE CASE_NUMBER = ?;"""
+                                        df = pd.read_sql(
+                                            query, engine, params=(str(case_number),))
+                                        case_id_rows = df.to_dict(
+                                            orient='records')
+
+                                        case_log_link = None
+                                        if case_id_rows:
+                                            case_id = case_id_rows[0]['CASE_ID']
+                                            victim_token = secrets.token_urlsafe(
+                                                32)
+
+                                            query = """
+                                                        INSERT INTO VICTIM_ACCESS_TOKENS(CASE_ID,TOKEN)
+                                                        VALUES
+                                                        (:case_id,:token);
+                                                """
+                                            with engine.connect() as conn:
+                                                conn.execute(
+                                                    text(query), {'case_id': case_id, 'token': victim_token})
+                                                conn.commit()
+
+                                            case_log_link = f"{BASE_URL}/case-log/{victim_token}"
+                                            save_json_data(
+                                                {'victim token generated for case_id': case_id})
+
+                                        # Finding information of the assigned case
+                                        query = """
+                                                    SELECT E.NAME,E.SURNAME,E.RANKS,E.EMAIL,C.VICTIM_EMAIL
+                                                    FROM EMPLOYEES E
+                                                    JOIN CASES C ON E.EMPLOYEE_NUMBER = C.ASSIGNED_TO
+                                                    WHERE C.CASE_NUMBER = ?;"""
+                                        df = pd.read_sql(
+                                            query, engine, params=(str(case_number),))
+                                        employee_rows = df.to_dict(
+                                            orient='records')
+
+                                        # If Verify whether the information was found if yes then victim and officer are updated
+                                        if employee_rows:
+                                            row = employee_rows[0]
+                                            name = row.get('NAME')
+                                            surname = row.get('SURNAME')
+                                            rank = row.get('RANKS')
+                                            officer_email = row.get('EMAIL')
+                                            victim_email = row.get(
+                                                'VICTIM_EMAIL')
+                                            offMessage = (
+                                                f"Dear {rank} {name} {surname},\n\n"
+                                                f"This is to formally notify you that case number {case_number} has been "
+                                                f"assigned to you for investigation. Please log into the Case Management "
+                                                f"System at your earliest convenience to review the case details and "
+                                                f"proceed accordingly.\n\n"
+                                                f"Regards,\n"
+                                                f"SAPS Case Management System")
+                                            victMessage = (
+                                                f"Dear Complainant,\n\n"
+                                                f"This message serves to inform you of an update regarding case number "
+                                                f"{case_number}. The case has been formally assigned to {rank} {name} "
+                                                f"{surname} for investigation.\n\nCase Status: Assigned\n\n"
+                                                f"Should you wish to make any enquiries regarding the progress of your "
+                                                f"case, you may contact the investigating officer directly via email at "
+                                                f"{officer_email}.\n\n"
+                                                f"You can view the ongoing progress of your case at any time using the "
+                                                f"link below:\n{case_log_link}\n\n"
+                                                f"Regards,\n"
+                                                f"SAPS Case Management System")
+
+                                            # Emailing the officer about the assignement
+                                            caseUpdate_email(
+                                                offMessage, officer_email)
+                                            save_json_data(
+                                                {'officer': 'emailed'})
+
+                                            # Emailing the victim about the assignemnt
+                                            caseUpdate_email(
+                                                victMessage, victim_email)
+                                            save_json_data(
+                                                {'victim': f'emailed for case {case_number} assigned to {name}'})
+                                            return {'status': 'added'}
+                                        else:
+                                            save_json_data(
+                                                {'victim': 'not emailed'})
+                                    else:
+                                        return {'status': 'not added'}
                         else:
-                            return {'status': 'not added'}
+                            save_json_data(
+                                {'case number and employee number': 'not added'})
+                            return {'': ''}, 500
                     else:
                         return {'status': 'not added'}
 
@@ -2538,7 +2702,8 @@ class Investigation(Resource):
                         conn.commit()
                         rows_updated = result.rowcount
 
-                    save_json_data({'rows': rows_updated, 'case_id': case_id, 'status': 'reopened'})
+                    save_json_data(
+                        {'rows': rows_updated, 'case_id': case_id, 'status': 'reopened'})
 
                     if rows_updated > 0:
                         return {'status': 'reopened'}
@@ -2607,7 +2772,6 @@ class Investigation(Resource):
 # host 0.0.0.0 allows access from other devices on the network.
 # port 5000 is the API communication port.
 # ==========================================================
-
 
 
 @hostsite.route('/case-log/<token>')
