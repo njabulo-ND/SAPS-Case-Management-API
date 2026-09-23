@@ -2602,16 +2602,29 @@ class Investigation(Resource):
         # Returns all progress updates logged against a case,
         # newest first.
         # ==========================================================
+
         try:
             action = request.args.get('action')
 
             if action.lower() == 'list':
                 case_id = request.args.get('case_id')
                 query = """
-                            SELECT LOG_ID,CASE_ID,LOGGED_BY,FORMAT(ENTRY_DATE, 'yyyy-MM-dd HH:mm') AS ENTRY_DATE,UPDATE_TEXT
-                            FROM INVESTIGATION_LOG
-                            WHERE CASE_ID = ?
-                            ORDER BY ENTRY_DATE DESC;"""
+                            SELECT
+                                IL.LOG_ID,
+                                IL.CASE_ID,
+                                IL.LOGGED_BY,
+                                LOGGER.NAME + ' ' + LOGGER.SURNAME AS LOGGED_BY_NAME,
+                                FORMAT(IL.ENTRY_DATE, 'yyyy-MM-dd HH:mm') AS ENTRY_DATE,
+                                IL.UPDATE_TEXT,
+                                IL.IS_DELETED,
+                                IL.DELETED_BY,
+                                DELETER.NAME + ' ' + DELETER.SURNAME AS DELETED_BY_NAME,
+                                FORMAT(IL.DELETED_AT, 'yyyy-MM-dd HH:mm') AS DELETED_AT
+                            FROM INVESTIGATION_LOG IL
+                            LEFT JOIN EMPLOYEES LOGGER ON LOGGER.EMPLOYEE_NUMBER = IL.LOGGED_BY
+                            LEFT JOIN EMPLOYEES DELETER ON DELETER.EMPLOYEE_NUMBER = IL.DELETED_BY
+                            WHERE IL.CASE_ID = ?
+                            ORDER BY IL.ENTRY_DATE DESC;"""
                 df = pd.read_sql(query, engine, params=(case_id,))
                 data = df.to_dict(orient='records')
 
@@ -2633,15 +2646,19 @@ class Investigation(Resource):
 
     def post(self):
         # ==========================================================
-        # Add Log Entry / Resolve Case
+        # Add Log Entry / Resolve Case / Reopen Case
         # ==========================================================
-        # Handles two kinds of investigation-log submissions:
+        # Handles investigation-log submissions:
         #
         # 1. Progress Update:
         #    - Adds a new dated entry to INVESTIGATION_LOG.
+        #    - Emails the victim that a new update was logged.
         #
         # 2. Resolve:
         #    - Marks the case as RESOLVED on the CASES table.
+        #
+        # 3. Reopen:
+        #    - Marks a resolved case as ASSIGNED again.
         # ==========================================================
         try:
             data = request.get_json()
@@ -2654,17 +2671,39 @@ class Investigation(Resource):
                 employee_number = data.get('employeeNumber')
                 update_text_value = data.get('updateText')
 
-                query = """
+                insert_query = """
                             INSERT INTO INVESTIGATION_LOG(CASE_ID,LOGGED_BY,UPDATE_TEXT)
                             VALUES
                             (:case_id,:logged_by,:update_text);
                     """
                 with engine.connect() as conn:
                     conn.execute(
-                        text(query), {'case_id': case_id, 'logged_by': employee_number, 'update_text': update_text_value})
+                        text(insert_query), {'case_id': case_id, 'logged_by': employee_number, 'update_text': update_text_value})
                     conn.commit()
 
                 save_json_data(data)
+
+                # Notify the victim that a new update was logged
+                query = """
+                            SELECT C.CASE_NUMBER, C.VICTIM_EMAIL, V.TOKEN
+                            FROM CASES C
+                            LEFT JOIN VICTIM_ACCESS_TOKENS V ON V.CASE_ID = C.CASE_ID
+                            WHERE C.CASE_ID = ?;"""
+                df = pd.read_sql(query, engine, params=(str(case_id),))
+                case_rows = df.to_dict(orient='records')
+
+                if case_rows and case_rows[0].get('VICTIM_EMAIL') and case_rows[0].get('TOKEN'):
+                    row = case_rows[0]
+                    case_log_link = f"{BASE_URL}/case-log/{row['TOKEN']}"
+                    # update_message = (
+                    #     f"Dear Complainant,\n\n"
+                    #     f"A new progress update has been logged on case number {row['CASE_NUMBER']}.\n\n"
+                    #     f"You can view the full case progress at any time using the link below:\n{case_log_link}\n\n"
+                    #     f"Regards,\n"
+                    #     f"SAPS Case Management System")
+                    # caseUpdate_email(update_message, row['VICTIM_EMAIL'])
+                    save_json_data({'victim': f'emailed update for case {row["CASE_NUMBER"]}'})
+
                 return {'status': 'added'}
 
             if data.get('action'):
@@ -2728,25 +2767,53 @@ class Investigation(Resource):
 
     def delete(self):
         # ==========================================================
-        # Delete Log Entry
+        # Delete Log Entry (soft delete)
         # ==========================================================
-        # DELETE /investigation?log_id=<id>
+        # DELETE /investigation?log_id=<id>&employee_number=<number>
+        # Marks the entry as deleted rather than removing it, and
+        # emails the victim that a log entry was removed.
         # ==========================================================
+
         try:
             log_id = request.args.get('log_id')
+            employee_number = request.args.get('employee_number')
 
             query = """
-                        DELETE FROM INVESTIGATION_LOG
+                        UPDATE INVESTIGATION_LOG
+                        SET IS_DELETED = 1, DELETED_BY = :employee_number, DELETED_AT = GETDATE()
                         WHERE LOG_ID = :log_id
                         """
             with engine.connect() as conn:
-                result = conn.execute(text(query), {'log_id': log_id})
+                result = conn.execute(
+                    text(query), {'log_id': log_id, 'employee_number': employee_number})
                 conn.commit()
                 rows_deleted = result.rowcount
 
-            save_json_data({'rows deleted': rows_deleted, 'log_id': log_id})
+            save_json_data({'rows soft-deleted': rows_deleted, 'log_id': log_id, 'deleted_by': employee_number})
 
             if rows_deleted > 0:
+                # Notify the victim that a log entry was removed
+                query = """
+                            SELECT C.CASE_NUMBER, C.VICTIM_EMAIL, V.TOKEN
+                            FROM INVESTIGATION_LOG IL
+                            JOIN CASES C ON C.CASE_ID = IL.CASE_ID
+                            LEFT JOIN VICTIM_ACCESS_TOKENS V ON V.CASE_ID = C.CASE_ID
+                            WHERE IL.LOG_ID = ?;"""
+                df = pd.read_sql(query, engine, params=(str(log_id),))
+                case_rows = df.to_dict(orient='records')
+
+                if case_rows and case_rows[0].get('VICTIM_EMAIL') and case_rows[0].get('TOKEN'):
+                    row = case_rows[0]
+                    case_log_link = f"{BASE_URL}/case-log/{row['TOKEN']}"
+                    # delete_message = (
+                    #     f"Dear Complainant,\n\n"
+                    #     f"A log entry on case number {row['CASE_NUMBER']} has been removed.\n\n"
+                    #     f"You can view the current case progress at any time using the link below:\n{case_log_link}\n\n"
+                    #     f"Regards,\n"
+                    #     f"SAPS Case Management System")
+                    # caseUpdate_email(delete_message, row['VICTIM_EMAIL'])
+                    save_json_data({'victim': f'emailed deletion notice for case {row["CASE_NUMBER"]}'})
+
                 return {'status': 'deleted'}
             else:
                 return {'status': 'not found'}
@@ -2763,7 +2830,6 @@ class Investigation(Resource):
             print(f"URL Error: {e}")
         except Exception as e:
             return {"error": str(e)}, 500
-
 # ==========================================================
 # Application Entry Point
 # ==========================================================
@@ -2791,9 +2857,14 @@ def case_log(token):
         case_info = case_rows[0]
 
         query = """
-                    SELECT FORMAT(ENTRY_DATE, 'yyyy-MM-dd HH:mm') AS ENTRY_DATE, UPDATE_TEXT
+                    SELECT
+                        FORMAT(IL.ENTRY_DATE, 'yyyy-MM-dd HH:mm') AS ENTRY_DATE,
+                        IL.UPDATE_TEXT,
+                        IL.IS_DELETED,
+                        E.RANKS + ' ' + E.NAME + ' ' + E.SURNAME AS LOGGED_BY_NAME
                     FROM INVESTIGATION_LOG IL
                     JOIN VICTIM_ACCESS_TOKENS V ON IL.CASE_ID = V.CASE_ID
+                    LEFT JOIN EMPLOYEES E ON E.EMPLOYEE_NUMBER = IL.LOGGED_BY
                     WHERE V.TOKEN = ?
                     ORDER BY IL.ENTRY_DATE DESC;"""
         df = pd.read_sql(query, engine, params=(token,))
@@ -2802,36 +2873,173 @@ def case_log(token):
         entries_html = ""
         if log_rows:
             for entry in log_rows:
-                entries_html += f"""
-                    <div class="entry">
-                        <div class="entry-date">{entry['ENTRY_DATE']}</div>
-                        <div class="entry-text">{entry['UPDATE_TEXT']}</div>
-                    </div>
-                """
+                if entry.get('IS_DELETED'):
+                    entries_html += f"""
+                        <div class="entry entry-deleted">
+                            <div class="entry-date">{entry['ENTRY_DATE']}</div>
+                            <div class="entry-text-deleted">This log entry was removed</div>
+                        </div>
+                    """
+                else:
+                    logged_by = entry.get('LOGGED_BY_NAME') or "Unknown Officer"
+                    entries_html += f"""
+                        <div class="entry">
+                            <div class="entry-date">{entry['ENTRY_DATE']}</div>
+                            <div class="entry-text">{entry['UPDATE_TEXT']}</div>
+                            <div class="entry-author">— {logged_by}</div>
+                        </div>
+                    """
         else:
             entries_html = "<p class='empty'>No progress updates have been logged yet.</p>"
+
+        status_colours = {
+            "UNASSIGNED": "#6c757d",
+            "ASSIGNED": "#f0ad4e",
+            "RESOLVED": "#28a745",
+        }
+        status_colour = status_colours.get(case_info['STATUS'], "#6c757d")
 
         html = f"""
         <html>
         <head>
             <title>Case {case_info['CASE_NUMBER']} — Progress</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
-                body {{ font-family: Arial, sans-serif; background: #f5f5f5; padding: 30px; }}
-                .card {{ background: #fff; border-radius: 8px; padding: 20px; max-width: 600px; margin: auto; }}
-                h1 {{ color: #003366; font-size: 20px; }}
-                .status {{ display: inline-block; padding: 4px 10px; border-radius: 12px; color: #fff; font-size: 12px; font-weight: bold; background: #f0ad4e; }}
-                .entry {{ border-left: 4px solid #003366; padding: 10px; margin-top: 12px; background: #fafafa; }}
-                .entry-date {{ font-size: 12px; color: #777; }}
-                .entry-text {{ font-size: 14px; margin-top: 4px; }}
-                .empty {{ color: #888; font-style: italic; }}
+                * {{ box-sizing: border-box; }}
+                body {{
+                    font-family: 'Segoe UI', Arial, sans-serif;
+                    background: #eef3ff;
+                    padding: 30px 16px;
+                    margin: 0;
+                }}
+                .card {{
+                    background: #fff;
+                    border-radius: 16px;
+                    max-width: 600px;
+                    margin: auto;
+                    overflow: hidden;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+                }}
+                .header {{
+                    background: #003366;
+                    padding: 24px;
+                    display: flex;
+                    align-items: center;
+                    gap: 14px;
+                }}
+                .logo {{
+                    width: 52px;
+                    height: 52px;
+                    border-radius: 50%;
+                    border: 2px solid #fff;
+                    object-fit: cover;
+                    flex-shrink: 0;
+                }}
+                .header-text h1 {{
+                    color: #fff;
+                    font-size: 15px;
+                    margin: 0;
+                    letter-spacing: 1px;
+                    text-transform: uppercase;
+                }}
+                .header-text p {{
+                    color: #cfd8e6;
+                    font-size: 11px;
+                    margin: 4px 0 0;
+                }}
+                .body {{
+                    padding: 24px;
+                }}
+                .case-number {{
+                    color: #003366;
+                    font-size: 22px;
+                    font-weight: 800;
+                    margin: 0 0 8px;
+                }}
+                .status {{
+                    display: inline-block;
+                    padding: 5px 12px;
+                    border-radius: 999px;
+                    color: #fff;
+                    font-size: 11px;
+                    font-weight: 700;
+                    letter-spacing: 0.5px;
+                    background: {status_colour};
+                }}
+                .section-title {{
+                    font-size: 13px;
+                    font-weight: 700;
+                    letter-spacing: 0.5px;
+                    text-transform: uppercase;
+                    color: #6c757d;
+                    margin-top: 28px;
+                    margin-bottom: 12px;
+                }}
+                .entry {{
+                    border-left: 4px solid #003366;
+                    padding: 12px 14px;
+                    margin-top: 10px;
+                    background: #f8f9fb;
+                    border-radius: 6px;
+                }}
+                .entry-deleted {{
+                    border-left-color: #c0392b;
+                    background: #f5f5f5;
+                }}
+                .entry-date {{
+                    font-size: 11px;
+                    color: #888;
+                    margin-bottom: 4px;
+                }}
+                .entry-text {{
+                    font-size: 14px;
+                    color: #1a1a1a;
+                    line-height: 1.4;
+                }}
+                .entry-text-deleted {{
+                    font-size: 13px;
+                    color: #999;
+                    font-style: italic;
+                }}
+                .entry-author {{
+                    font-size: 11px;
+                    color: #555;
+                    font-style: italic;
+                    margin-top: 6px;
+                }}
+                .empty {{
+                    color: #888;
+                    font-style: italic;
+                    font-size: 13px;
+                }}
+                .footer {{
+                    text-align: center;
+                    font-size: 10px;
+                    color: #aaa;
+                    padding: 16px;
+                    border-top: 1px solid #eee;
+                }}
             </style>
         </head>
         <body>
             <div class="card">
-                <h1>Case {case_info['CASE_NUMBER']}</h1>
-                <span class="status">{case_info['STATUS']}</span>
-                <h2 style="font-size:16px;margin-top:24px;">Investigation Log</h2>
-                {entries_html}
+                <div class="header">
+                    <img src="/static/saps-logo.png" class="logo" alt="SAPS Logo">
+                    <div class="header-text">
+                        <h1>South African Police Service</h1>
+                        <p>Digital Case Management System</p>
+                    </div>
+                </div>
+                <div class="body">
+                    <p class="case-number">Case {case_info['CASE_NUMBER']}</p>
+                    <span class="status">{case_info['STATUS']}</span>
+
+                    <div class="section-title">Investigation Progress</div>
+                    {entries_html}
+                </div>
+                <div class="footer">
+                    This is a secure, view-only case update page. If you have questions, contact the investigating officer.
+                </div>
             </div>
         </body>
         </html>
@@ -2842,7 +3050,6 @@ def case_log(token):
         return f"<h2>Database Error: {str(e)}</h2>", 500
     except Exception as e:
         return f"<h2>Error: {str(e)}</h2>", 500
-
 
 try:
     api.add_resource(EmployeeDetails, '/employees')
