@@ -2608,28 +2608,34 @@ class Investigation(Resource):
 
             if action.lower() == 'list':
                 case_id = request.args.get('case_id')
-                query = """
-                            SELECT
-                                IL.LOG_ID,
-                                IL.CASE_ID,
-                                IL.LOGGED_BY,
-                                LOGGER.NAME + ' ' + LOGGER.SURNAME AS LOGGED_BY_NAME,
-                                FORMAT(IL.ENTRY_DATE, 'yyyy-MM-dd HH:mm') AS ENTRY_DATE,
-                                IL.UPDATE_TEXT,
-                                IL.IS_DELETED,
-                                IL.DELETED_BY,
-                                DELETER.NAME + ' ' + DELETER.SURNAME AS DELETED_BY_NAME,
-                                FORMAT(IL.DELETED_AT, 'yyyy-MM-dd HH:mm') AS DELETED_AT
-                            FROM INVESTIGATION_LOG IL
-                            LEFT JOIN EMPLOYEES LOGGER ON LOGGER.EMPLOYEE_NUMBER = IL.LOGGED_BY
-                            LEFT JOIN EMPLOYEES DELETER ON DELETER.EMPLOYEE_NUMBER = IL.DELETED_BY
-                            WHERE IL.CASE_ID = ?
-                            ORDER BY IL.ENTRY_DATE DESC;"""
-                df = pd.read_sql(query, engine, params=(case_id,))
-                data = df.to_dict(orient='records')
+                try:
+                    query = """
+                                SELECT
+                                    IL.LOG_ID,
+                                    IL.CASE_ID,
+                                    IL.LOGGED_BY,
+                                    LOGGER.NAME + ' ' + LOGGER.SURNAME AS LOGGED_BY_NAME,
+                                    FORMAT(IL.ENTRY_DATE, 'yyyy-MM-dd HH:mm') AS ENTRY_DATE,
+                                    IL.UPDATE_TEXT,
+                                    IL.IS_DELETED,
+                                    IL.DELETED_BY,
+                                    DELETER.NAME + ' ' + DELETER.SURNAME AS DELETED_BY_NAME,
+                                    FORMAT(IL.DELETED_AT, 'yyyy-MM-dd HH:mm') AS DELETED_AT
+                                FROM INVESTIGATION_LOG IL
+                                LEFT JOIN EMPLOYEES LOGGER ON LOGGER.EMPLOYEE_NUMBER = IL.LOGGED_BY
+                                LEFT JOIN EMPLOYEES DELETER ON DELETER.EMPLOYEE_NUMBER = IL.DELETED_BY
+                                WHERE IL.CASE_ID = ?
+                                ORDER BY IL.ENTRY_DATE DESC;"""
+                    df = pd.read_sql(query, engine, params=(int(case_id),))
+                    data = df.to_dict(orient='records')
 
-                save_json_data({'investigation log': data})
-                return data
+                    save_json_data({'investigation log': data})
+                    return data
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    save_json_data({'ERROR': str(e)})
+                    return {'error': str(e)}, 500
 
         except SQLAlchemyError as e:
             return {"Database Error": str(e)}, 500
