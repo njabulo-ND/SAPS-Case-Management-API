@@ -21,6 +21,14 @@ import math
 import time
 from datetime import datetime, timedelta
 import password_recovery
+import pdf_generation
+import re
+
+
+def safe_json_load(value):
+    if value is None:
+        return {}
+    return json.loads(value)
 
 
 load_dotenv()
@@ -130,8 +138,63 @@ def sending_victim_email(message, receiver_email):
         # msg["From"] = sender_email
         msg["To"] = receiver_email
         msg.set_content(message)
-        # 5. Connect and send
 
+        # 5. Connect and send
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+
+        print(f"OTP successfully sent to {receiver_email}!")
+        return
+
+    except Exception as e:
+        print(f"Failed to send email. Error: {e}")
+        return None
+
+
+def pdf_email(message, receiver_email, pdf_path=None):
+    try:
+
+        # 2. Automatically pull your hidden credentials
+        sender_email = os.getenv("EMAIL_USER")
+        sender_password = os.getenv("EMAIL_PASS")
+
+        # Safety check to make sure the variables loaded correctly
+        if not sender_email or not sender_password:
+            print("Error: Could not find your email credentials in the .env file.")
+            return None
+
+        # 3. Configure server details
+        smtp_server = "smtp.gmail.com"
+        smtp_port = 587
+
+        # 4. Create the email content
+        # 4. Create a more formal email structure to pass spam filters
+        msg = EmailMessage()
+        # Change "Your Business Name" to whatever you want people to see
+        msg["From"] = f"SAPS Case Management System <{sender_email}>"
+        msg["Subject"] = "Case Registration Confirmation: Your Case Reference Number"
+        # msg["From"] = sender_email
+        msg["To"] = receiver_email
+        msg.set_content(message)
+        # 4b. Attach the PDF if one was provided
+        if pdf_path:
+            if os.path.exists(pdf_path):
+                with open(pdf_path, "rb") as f:
+                    pdf_data = f.read()
+
+                msg.add_attachment(
+                    pdf_data,
+                    maintype="application",
+                    subtype="pdf",
+                    filename=os.path.basename(pdf_path)
+                )
+            else:
+                print(
+                    f"Warning: PDF path '{pdf_path}' does not exist. Sending email without attachment.")
+
+        # 5. Connect and send
         with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.starttls()
             server.login(sender_email, sender_password)
@@ -984,6 +1047,8 @@ try:
             #
             # 2. Detective Case List:
             #    - Returns only cases assigned to a specific officer.
+            # 3. Pdf Case
+            #    -Sent to the email
             # ==========================================================
             try:
                 action = request.args.get('action')
@@ -1008,6 +1073,63 @@ try:
                     data = df.to_dict(orient='records')
                     save_json_data({'case list': data})
                     return data
+                elif action.lower() == 'pdf':
+                    employee_number = request.args.get('employee_number')
+                    case_id = request.args.get('case_id')
+                    query = """
+                                SELECT E.EMAIL,C.STATEMENT_FORM,C.MODUS_OPERANDI,C.P21,C.INVESTIGATION_DIARY,C.CASE_NUMBER
+                                FROM CASES C
+                                JOIN EMPLOYEES E ON E.EMPLOYEE_NUMBER = C.ASSIGNED_TO
+                                WHERE C.ASSIGNED_TO = ? AND C.CASE_NUMBER = ?;"""
+                    safe_case_id = re.sub(r'[^A-Za-z0-9_-]', '_', str(case_id))
+                    df = pd.read_sql(query, engine, params=(employee_number,case_id,))
+                    data = df.to_dict(orient='records')
+
+                    
+                    if data:
+                        save_json_data({'Data found': data})
+                        data = data[0]
+                        email = data.get('EMAIL')
+                        p21 = safe_json_load(data.get('P21'))
+                        investigation_diary = safe_json_load(
+                            data.get('INVESTIGATION_DIARY'))
+                        modus = safe_json_load(data.get('MODUS_OPERANDI'))
+                        statement = safe_json_load(data.get('STATEMENT_FORM'))
+                        forms = {
+                            "P21": p21,
+                            "INVESTIGATION DIARY": investigation_diary,
+                            "MODUS OPERANDI": modus,
+                            "STATEMENT FORM": statement
+                        }
+                        pdf_output_path = pdf_generation.generate_case_pdf(
+                            forms, output_path=f"case_{safe_case_id}.pdf")
+                        if pdf_output_path:
+                            save_json_data('path found')
+                            message = (
+                                f"Dear Ofiicer,\n\n"
+                                f"As per your request, please find attached the official case documentation "
+                                f"for case number {case_id}. This document contains a summary of the "
+                                f"information currently recorded on your case file.\n\n"
+                                f"Please note that this document is confidential and intended solely for "
+                                f"your reScords. Should you have any questions regarding the contents of "
+                                f"this document, or require further assistance, please contact your "
+                                f"assigned investigating officer through the Case Management System.\n\n"
+                                f"Regards,\n"
+                                f"SAPS Case Management System")
+                            pdf_email(message, email, pdf_output_path)
+                            save_json_data('pdf sent')
+                            if os.path.exists(pdf_output_path):
+                                os.remove(pdf_output_path)
+                                print(f"Deleted temporary file: {pdf_output_path}")
+                            save_json_data('pdf deleted')
+                            return {'status':'sent'}
+                        else:
+                            save_json_data('file path not found')
+                            return {},500    
+                    else:
+                        save_json_data({'data':'is empty officer is not attached to the case'})
+                        return {},500
+
             # catches ALL database errors in one line
             except SQLAlchemyError as e:
                 return {"Database Error": str(e)}, 500
@@ -1258,7 +1380,7 @@ try:
                                                 else:
                                                     save_json_data(
                                                         {"Something happened": "When assigning new & old officer information to variables "
-                                                        f"new = {new_officer_number}\nold = {old_officer_number}"})
+                                                         f"new = {new_officer_number}\nold = {old_officer_number}"})
                                                     return {'': ''}, 500
                                         else:
                                             save_json_data(
@@ -2708,7 +2830,8 @@ class Investigation(Resource):
                     #     f"Regards,\n"
                     #     f"SAPS Case Management System")
                     # caseUpdate_email(update_message, row['VICTIM_EMAIL'])
-                    save_json_data({'victim': f'emailed update for case {row["CASE_NUMBER"]}'})
+                    save_json_data(
+                        {'victim': f'emailed update for case {row["CASE_NUMBER"]}'})
 
                 return {'status': 'added'}
 
@@ -2795,7 +2918,8 @@ class Investigation(Resource):
                 conn.commit()
                 rows_deleted = result.rowcount
 
-            save_json_data({'rows soft-deleted': rows_deleted, 'log_id': log_id, 'deleted_by': employee_number})
+            save_json_data({'rows soft-deleted': rows_deleted,
+                           'log_id': log_id, 'deleted_by': employee_number})
 
             if rows_deleted > 0:
                 # Notify the victim that a log entry was removed
@@ -2818,7 +2942,8 @@ class Investigation(Resource):
                     #     f"Regards,\n"
                     #     f"SAPS Case Management System")
                     # caseUpdate_email(delete_message, row['VICTIM_EMAIL'])
-                    save_json_data({'victim': f'emailed deletion notice for case {row["CASE_NUMBER"]}'})
+                    save_json_data(
+                        {'victim': f'emailed deletion notice for case {row["CASE_NUMBER"]}'})
 
                 return {'status': 'deleted'}
             else:
@@ -2887,7 +3012,8 @@ def case_log(token):
                         </div>
                     """
                 else:
-                    logged_by = entry.get('LOGGED_BY_NAME') or "Unknown Officer"
+                    logged_by = entry.get(
+                        'LOGGED_BY_NAME') or "Unknown Officer"
                     entries_html += f"""
                         <div class="entry">
                             <div class="entry-date">{entry['ENTRY_DATE']}</div>
@@ -3056,6 +3182,7 @@ def case_log(token):
         return f"<h2>Database Error: {str(e)}</h2>", 500
     except Exception as e:
         return f"<h2>Error: {str(e)}</h2>", 500
+
 
 try:
     api.add_resource(EmployeeDetails, '/employees')
