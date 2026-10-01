@@ -2716,19 +2716,35 @@ class CommanderAnalytics(Resource):
 
 class Investigation(Resource):
 
+    # Must match the outcome values used by the React Native screen
+    ALLOWED_OUTCOMES = {
+        'CONVICTED',
+        'ACQUITTED',
+        'CHARGES_WITHDRAWN',
+        'PROPERTY_RECOVERED',
+        'PROPERTY_NOT_RECOVERED',
+        'UNFOUNDED',
+        'OTHER',
+    }
+    VERDICT_MAX_LENGTH = 2000
+
     def get(self):
         # ==========================================================
-        # Retrieve Investigation Log
+        # Retrieve Investigation Log / Final Verdict
         # ==========================================================
         # GET /investigation?action=list&case_id=<id>
         # Returns all progress updates logged against a case,
         # newest first.
+        #
+        # GET /investigation?action=verdict&case_id=<id>
+        # Returns the final verdict recorded when the case was
+        # resolved. Returns an empty object if there is none.
         # ==========================================================
 
         try:
-            action = request.args.get('action')
+            action = (request.args.get('action') or '').lower()
 
-            if action.lower() == 'list':
+            if action == 'list':
                 case_id = request.args.get('case_id')
                 try:
                     query = """
@@ -2759,6 +2775,41 @@ class Investigation(Resource):
                     save_json_data({'ERROR': str(e)})
                     return {'error': str(e)}, 500
 
+            elif action == 'verdict':
+                case_id = request.args.get('case_id')
+                try:
+                    query = """
+                                SELECT
+                                    C.OUTCOME_TYPE,
+                                    C.FINAL_VERDICT,
+                                    C.RESOLVED_BY,
+                                    RESOLVER.NAME + ' ' + RESOLVER.SURNAME AS RESOLVED_BY_NAME,
+                                    FORMAT(C.DATE_RESOLVED, 'yyyy-MM-dd HH:mm') AS DATE_RESOLVED
+                                FROM CASES C
+                                LEFT JOIN EMPLOYEES RESOLVER ON RESOLVER.EMPLOYEE_NUMBER = C.RESOLVED_BY
+                                WHERE C.CASE_ID = ?;"""
+                    df = pd.read_sql(query, engine, params=(int(case_id),))
+
+                    if df.empty:
+                        return {}
+
+                    # Turn NULLs into None so the JSON is clean
+                    df = df.astype(object).where(pd.notnull(df), None)
+                    data = df.to_dict(orient='records')[0]
+
+                    save_json_data({'verdict': {
+                        'case_id': case_id,
+                        'outcome_type': data.get('OUTCOME_TYPE')}})
+                    return data
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    save_json_data({'ERROR': str(e)})
+                    return {'error': str(e)}, 500
+
+            else:
+                return {'error': 'Unknown action'}, 400
+
         except SQLAlchemyError as e:
             return {"Database Error": str(e)}, 500
         except firebase_exceptions.FirebaseError as e:
@@ -2783,10 +2834,16 @@ class Investigation(Resource):
         #    - Emails the victim that a new update was logged.
         #
         # 2. Resolve:
-        #    - Marks the case as RESOLVED on the CASES table.
+        #    - Requires an outcome type and a final verdict.
+        #    - Marks the case as RESOLVED and saves the verdict,
+        #      the resolving officer and the resolved date in one
+        #      update. The verdict is never overwritten: a case that
+        #      already holds a verdict cannot be resolved again until
+        #      it has been reopened.
         #
         # 3. Reopen:
-        #    - Marks a resolved case as ASSIGNED again.
+        #    - Marks a resolved case as ASSIGNED again and clears the
+        #      final verdict so a new one is written on the next resolve.
         # ==========================================================
         try:
             data = request.get_json()
@@ -2836,33 +2893,90 @@ class Investigation(Resource):
                 return {'status': 'added'}
 
             if data.get('action'):
-                if data.get('action').lower() == 'resolve':
+                action = str(data.get('action')).lower()
+
+                if action == 'resolve':
                     case_id = data.get('caseId')
+                    employee_number = str(data.get('employeeNumber') or '').strip()
+                    outcome_type = str(data.get('outcomeType') or '').strip().upper()
+                    final_verdict = str(data.get('finalVerdict') or '').strip()
+
+                    # ---- Validation ----
+                    if not case_id or not employee_number:
+                        return {
+                            'status': 'not resolved',
+                            'message': 'Case and officer details are required.'
+                        }, 400
+
+                    if outcome_type not in self.ALLOWED_OUTCOMES:
+                        return {
+                            'status': 'not resolved',
+                            'message': 'Please select a valid outcome for the case.'
+                        }, 400
+
+                    if not final_verdict:
+                        return {
+                            'status': 'not resolved',
+                            'message': 'A final verdict is required to resolve a case.'
+                        }, 400
+
+                    if len(final_verdict) > self.VERDICT_MAX_LENGTH:
+                        return {
+                            'status': 'not resolved',
+                            'message': f'The final verdict cannot be longer than {self.VERDICT_MAX_LENGTH} characters.'
+                        }, 400
+
+                    # ---- Resolve + save verdict in one update ----
+                    # The WHERE clause stops an existing verdict being overwritten.
                     query = """
                                 UPDATE CASES
-                                SET STATUS = 'RESOLVED', DATE_RESOLVED = GETDATE()
+                                SET STATUS = 'RESOLVED',
+                                    DATE_RESOLVED = GETDATE(),
+                                    OUTCOME_TYPE = :outcome_type,
+                                    FINAL_VERDICT = :final_verdict,
+                                    RESOLVED_BY = :resolved_by
                                 WHERE CASE_ID = :case_id
+                                  AND ISNULL(STATUS, '') <> 'RESOLVED'
+                                  AND FINAL_VERDICT IS NULL
                                 """
                     with engine.connect() as conn:
                         result = conn.execute(
-                            text(query), {'case_id': case_id})
+                            text(query),
+                            {
+                                'case_id': case_id,
+                                'outcome_type': outcome_type,
+                                'final_verdict': final_verdict,
+                                'resolved_by': employee_number,
+                            })
                         conn.commit()
                         rows_updated = result.rowcount
 
                     save_json_data(
-                        {'rows': rows_updated, 'case_id': case_id, 'status': 'resolved'})
+                        {'rows': rows_updated, 'case_id': case_id,
+                         'outcome_type': outcome_type, 'status': 'resolved'})
 
                     if rows_updated > 0:
                         return {'status': 'resolved'}
                     else:
-                        return {'status': 'not resolved'}
+                        return {
+                            'status': 'not resolved',
+                            'message': 'This case is already resolved or could not be found.'
+                        }, 409
 
-                elif data.get('action').lower() == 'reopen':
+                elif action == 'reopen':
                     case_id = data.get('caseId')
+
+                    # Clearing the verdict columns removes the verdict, so the
+                    # next resolve starts fresh.
                     query = """
                                 UPDATE CASES
-                                SET STATUS = 'ASSIGNED', DATE_RESOLVED = NULL
+                                SET STATUS = 'ASSIGNED',
+                                    DATE_RESOLVED = NULL,
+                                    OUTCOME_TYPE = NULL,
+                                    FINAL_VERDICT = NULL,
+                                    RESOLVED_BY = NULL
                                 WHERE CASE_ID = :case_id
+                                  AND STATUS = 'RESOLVED'
                                 """
                     with engine.connect() as conn:
                         result = conn.execute(
@@ -2880,6 +2994,8 @@ class Investigation(Resource):
 
                 else:
                     return {'status': 'not added'}
+
+            return {'status': 'not added'}
 
         except SQLAlchemyError as e:
             return {"Database Error": str(e)}, 500
@@ -2961,6 +3077,8 @@ class Investigation(Resource):
             print(f"URL Error: {e}")
         except Exception as e:
             return {"error": str(e)}, 500
+
+
 # ==========================================================
 # Application Entry Point
 # ==========================================================
