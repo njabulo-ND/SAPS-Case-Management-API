@@ -346,12 +346,3 @@ def fill_all_forms(p21_form, case_number):
         }
 
 
-p21form = {
-    "iAm": "NKOSINATHI MTHIMUNYE",
-    "lang": "ENGLISH",
-    "statement": "I, NKOSINATHI MTHIMUNYE, Identity Number 9104120834085, aged 35 years, residing at 19 Extension 6, Orlando East, Soweto, Johannesburg, Gauteng, and contactable on 082 456 7188, do hereby state as follows: On the night of 20 September 2026 at approximately 22:15, I was present outside a private residence at 41 Vilakazi Street, Orlando East, Soweto, Johannesburg, postal code 1804, geographical block Orlando East, Soweto, Johannesburg, which is classified as outside private residence premises, when a violent incident occurred resulting in the death of Mr. Kabelo Khumalo, aged 33. An argument broke out between the victim and two suspects known to me, namely Sizwe Dlamini and Bongani Khosa, and the confrontation escalated quickly. I observed both suspects physically attacking the victim, with Sizwe striking him repeatedly with his fists while Bongani kicked him in the torso, and at one point Bongani produced a knife and stabbed the victim in the chest, causing him to collapse to the ground bleeding heavily. The suspects fled the scene immediately afterwards. Emergency services were contacted, and paramedics arrived shortly thereafter, but despite their efforts the victim was declared deceased at the scene. The South African Police Service (SAPS) was also contacted, and I provided them with the details of the suspects, whom I recognised and can positively identify. Sizwe Dlamini is a male aged 27, approximately 1.79 metres tall, medium build, light brown complexion, short black hair, trimmed beard, and at the time of the incident was wearing a black jacket, blue jeans, and white sneakers. Bongani Khosa is a male aged 28, approximately 1.81 metres tall, muscular build, dark complexion, short black hair, no facial hair, and at the time of the incident was wearing a grey hoodie, dark trousers, and black shoes. The instrument used was a knife, and no property was involved. I confirm that I know and understand the contents of this statement, and I declare it to be truthful to the best of my knowledge and belief, signed at Johannesburg on 21 September 2026.",
-    "initials": "",
-    "signature": ""
-}
-
-case_number = "JHB/00084/2026"
