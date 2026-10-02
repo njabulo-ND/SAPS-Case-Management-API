@@ -23,6 +23,8 @@ from datetime import datetime, timedelta
 import password_recovery
 import pdf_generation
 import re
+import boto3
+import aws_nova_ai
 
 
 def safe_json_load(value):
@@ -33,6 +35,10 @@ def safe_json_load(value):
 
 load_dotenv()
 
+bedrock_client = boto3.client(
+    "bedrock-runtime",
+    region_name="us-east-1"
+)
 
 def run_gemini(client, model, contents, config, retries=5):
     for i in range(retries):
@@ -682,10 +688,9 @@ def fill_all_forms(p21_form, case_number):
         given in the statement. Do not guess a postal code based on a suburb
         or city name alone but if victim mentioned location which the incident happend using that location
         you can identify to wich postal code the location mentioned belongs to.
+        
+        street name - the street the adress has on the statement if it is not there write not found
 
-        geographicalBlock - the broader area, suburb, or precinct the scene
-        falls within, if this can reasonably be determined from the address
-        or location details given in the statement.
 
         premisesType - the type of premises where the offence occurred (for
         example: business/shop, private residence, open street, vehicle),
@@ -707,7 +712,16 @@ def fill_all_forms(p21_form, case_number):
 
         response = run_gemini(
             client=client,
-            model="gemini-3.5-flash",
+#             #[
+                #     "gemini-flash-latest",    # 1. auto-points to the current recommended Flash
+                #     "gemini-2.5-flash",       # 2. older, established, usually least overloaded
+                #     "gemini-3.6-flash",       # 3. newer Flash, less hammered than 3.5/3.8
+                #     "gemini-3.1-flash-lite",  # 4. lighter, cheaper, less demand
+                #     "gemini-2.5-flash-lite",  # 5. lightest fallback
+                #     "gemini-2.5-pro",
+                # , "gemini-2.5-flash", "gemini-3.5-flash"  # 6. slower and pricier, but a separate capacity pool
+                # ]
+            model="gemini-flash-latest",
             contents=combined_instructions,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -1111,7 +1125,7 @@ try:
                                 f"for case number {case_id}. This document contains a summary of the "
                                 f"information currently recorded on your case file.\n\n"
                                 f"Please note that this document is confidential and intended solely for "
-                                f"your reScords. Should you have any questions regarding the contents of "
+                                f"your records. Should you have any questions regarding the contents of "
                                 f"this document, or require further assistance, please contact your "
                                 f"assigned investigating officer through the Case Management System.\n\n"
                                 f"Regards,\n"
@@ -1196,7 +1210,7 @@ try:
                         conn.commit()
 
                     # AI autofilling
-                    all_forms = fill_all_forms(
+                    all_forms = aws_nova_ai.fill_all_forms(
                         p21_form, case_number)
 
                     # Sending to where i ready the responses
