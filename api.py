@@ -323,6 +323,11 @@ except Exception as e:
 # AI intergration to all forms
 
 
+@hostsite.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 def fill_all_forms(p21_form, case_number):
     try:
         api_key = os.environ["GEMINI_API_KEY"]
@@ -3325,3 +3330,5 @@ try:
         hostsite.run(host="0.0.0.0", port=5000, debug=True)
 except firebase_exceptions.FirebaseError as e:
     print(f"Firebase Error: {e}")
+
+
