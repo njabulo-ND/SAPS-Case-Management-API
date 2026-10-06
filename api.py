@@ -270,7 +270,7 @@ try:
         f"DATABASE={database};"
         f"UID={username};"
         f"PWD={password};"
-        "TrustServerCertificate=yes;"
+        "Encrypt=yes;TrustServerCertificate=yes;"
     )
     refined_connecting_string = urllib.parse.quote_plus(conection_string)
     engine = create_engine(
@@ -3325,7 +3325,7 @@ try:
     api.add_resource(EmployeeDetails, '/employees')
     api.add_resource(Cases, '/cases')
     api.add_resource(CommanderAnalytics, '/analytics')
-    api.add_resource(Investigation, "/investigation")
+    api.add_resource(Investigation, '/investigation')
     if __name__ == '__main__':
         hostsite.run(host="0.0.0.0", port=5000, debug=True)
 except firebase_exceptions.FirebaseError as e:
