@@ -299,6 +299,7 @@ try:
     # ==========================================================
 
     def save_json_data(data):
+        print("LOG:", json.dumps(data, default=str), flush=True)
         with open('jsonToReadData.json', 'w') as file:
             json.dump(data, file, indent=4)
 
