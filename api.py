@@ -26,7 +26,7 @@ import re
 import boto3
 import aws_nova_ai
 import base64
-
+import requests
 
 def safe_json_load(value):
     if value is None:
@@ -68,34 +68,26 @@ def run_gemini(client, model, contents, config, retries=5):
 
 BASE_URL = os.getenv("BASE_URL")
 
-import base64
-import requests
+
 
 def send_mail(to_email, subject, body, pdf_path=None):
-    api_key = os.getenv("BREVO_API_KEY")
-    sender = os.getenv("EMAIL_USER")
-    if not api_key or not sender:
-        print("Missing BREVO_API_KEY or EMAIL_USER", flush=True)
+    url = os.getenv("MAIL_WEBHOOK_URL")
+    secret = os.getenv("MAIL_WEBHOOK_SECRET")
+    if not url or not secret:
+        print("Missing MAIL_WEBHOOK_URL or MAIL_WEBHOOK_SECRET", flush=True)
         return False
-    payload = {
-        "sender": {"name": "SAPS Case Management System", "email": sender},
-        "to": [{"email": to_email}],
-        "subject": subject,
-        "textContent": body,
-    }
+    payload = {"secret": secret, "to": to_email, "subject": subject, "body": body}
     if pdf_path and os.path.exists(pdf_path):
         with open(pdf_path, "rb") as f:
-            payload["attachment"] = [{
-                "name": os.path.basename(pdf_path),
-                "content": base64.b64encode(f.read()).decode(),
-            }]
-    r = requests.post(
-        "https://api.brevo.com/v3/smtp/email",
-        headers={"api-key": api_key, "content-type": "application/json"},
-        json=payload, timeout=20,
-    )
-    print(f"Brevo {r.status_code}: {r.text}", flush=True)
-    return r.status_code in (200, 201)
+            payload["pdf_base64"] = base64.b64encode(f.read()).decode()
+        payload["pdf_name"] = os.path.basename(pdf_path)
+    try:
+        r = requests.post(url, json=payload, timeout=30)
+        print(f"Mail webhook {r.status_code}: {r.text[:300]}", flush=True)
+        return r.status_code == 200 and '"ok":true' in r.text.replace(" ", "")
+    except Exception as e:
+        print(f"Mail webhook failed: {e}", flush=True)
+        return False
 
 def send_otp_email(receiver_email):
     otp = "".join(secrets.choice("0123456789") for _ in range(6))
