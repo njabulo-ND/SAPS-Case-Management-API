@@ -101,7 +101,7 @@ def send_otp_email(receiver_email):
         f"initiate this request, please contact your system administrator immediately.\n\n"
         f"Regards,")
     ok = send_mail(receiver_email, "Security Verification: Your One-Time Password Code", body)
-    return otp if ok else None
+    return otp 
 
 
 def sending_victim_email(message, receiver_email):
