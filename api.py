@@ -3321,6 +3321,23 @@ def case_log(token):
     except Exception as e:
         return f"<h2>Error: {str(e)}</h2>", 500
 
+import socket
+
+@hostsite.get("/smtpcheck")
+def smtpcheck():
+    results = {}
+    targets = {
+        "control_google_443": ("www.google.com", 443),
+        "gmail_587": ("smtp.gmail.com", 587),
+        "gmail_465": ("smtp.gmail.com", 465),
+    }
+    for name, (host, port) in targets.items():
+        try:
+            socket.create_connection((host, port), timeout=8).close()
+            results[name] = "open"
+        except Exception as e:
+            results[name] = f"failed: {e}"
+    return results
 
 try:
     api.add_resource(EmployeeDetails, '/employees')
