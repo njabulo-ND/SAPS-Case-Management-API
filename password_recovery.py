@@ -3,15 +3,17 @@ import random
 from datetime import datetime, timedelta
 import firebase_admin
 from firebase_admin import credentials, firestore, exceptions as firebase_exceptions
-import os
+import os, json
 from dotenv import load_dotenv
 
 load_dotenv()
 #firebase connection
 firebase_key = os.getenv("FIREBASE_CREDENTIALS")
 if not firebase_admin._apps:
-    cred = credentials.Certificate(
-        firebase_key)
+    if os.environ.get("FIREBASE_CREDENTIALS_JSON"):
+        cred = credentials.Certificate(json.loads(os.environ["FIREBASE_CREDENTIALS_JSON"]))
+    else:
+        cred = credentials.Certificate("saps-database-firebase-adminsdk-fbsvc-708fe1391c.json")
     firebase_admin.initialize_app(cred)
 firebase_db = firestore.client()
 

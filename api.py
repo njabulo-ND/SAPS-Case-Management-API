@@ -25,7 +25,8 @@ import pdf_generation
 import re
 import boto3
 import aws_nova_ai
-
+import base64
+import requests
 
 def safe_json_load(value):
     if value is None:
@@ -68,148 +69,49 @@ def run_gemini(client, model, contents, config, retries=5):
 BASE_URL = os.getenv("BASE_URL")
 
 
-def send_otp_email(receiver_email, retries=3):
-    for attempt in range(retries):
-        try:
-            otp = "".join(secrets.choice("0123456789") for _ in range(6))
-            sender_email = os.getenv("EMAIL_USER")
-            sender_password = os.getenv("EMAIL_PASS")
 
-            if not sender_email or not sender_password:
-                print("Error: Could not find your email credentials in the .env file.")
-                return None
+def send_mail(to_email, subject, body, pdf_path=None):
+    url = os.getenv("MAIL_WEBHOOK_URL")
+    secret = os.getenv("MAIL_WEBHOOK_SECRET")
+    if not url or not secret:
+        print("Missing MAIL_WEBHOOK_URL or MAIL_WEBHOOK_SECRET", flush=True)
+        return False
+    payload = {"secret": secret, "to": to_email, "subject": subject, "body": body}
+    if pdf_path and os.path.exists(pdf_path):
+        with open(pdf_path, "rb") as f:
+            payload["pdf_base64"] = base64.b64encode(f.read()).decode()
+        payload["pdf_name"] = os.path.basename(pdf_path)
+    try:
+        r = requests.post(url, json=payload, timeout=30)
+        print(f"Mail webhook {r.status_code}: {r.text[:300]}", flush=True)
+        return r.status_code == 200 and '"ok":true' in r.text.replace(" ", "")
+    except Exception as e:
+        print(f"Mail webhook failed: {e}", flush=True)
+        return False
 
-            msg = EmailMessage()
-            msg["From"] = f"SAPS Case Management System <{sender_email}>"
-            msg["Subject"] = "Security Verification: Your One-Time Password Code"
-            msg["To"] = receiver_email
-            msg.set_content(
-                f"Dear Officer,\n\n"
-                f"We received a request to log in to / sign up for your SAPS Case Management "
-                f"account. Please use the following One-Time Password (OTP) to complete your "
-                f"verification.\n\n"
-                f"Verification Code: {otp}\n\n"
-                f"This code was generated securely and will expire shortly. If you did not "
-                f"initiate this request, please contact your system administrator immediately.\n\n"
-                f"Regards,")
-
-            with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
-                server.starttls()
-                server.login(sender_email, sender_password)
-                server.send_message(msg)
-
-            print(f"OTP successfully sent to {receiver_email}!")
-            return otp
-
-        except Exception as e:
-            print(f"Attempt {attempt + 1}/{retries} failed. Error: {e}")
-            if attempt == retries - 1:
-                return None
+def send_otp_email(receiver_email):
+    otp = "".join(secrets.choice("0123456789") for _ in range(6))
+    print(f"OTP for {receiver_email}: {otp}", flush=True)
+    body = (
+        f"Dear Officer,\n\n"
+        f"We received a request to log in to / sign up for your SAPS Case Management "
+        f"account. Please use the following One-Time Password (OTP) to complete your "
+        f"verification.\n\nVerification Code: {otp}\n\n"
+        f"This code was generated securely and will expire shortly. If you did not "
+        f"initiate this request, please contact your system administrator immediately.\n\n"
+        f"Regards,")
+    ok = send_mail(receiver_email, "Security Verification: Your One-Time Password Code", body)
+    return otp 
 
 
-def sending_victim_email(message, receiver_email, retries=3):
-    for attempt in range(retries):
-        try:
-            sender_email = os.getenv("EMAIL_USER")
-            sender_password = os.getenv("EMAIL_PASS")
+def sending_victim_email(message, receiver_email):
+    send_mail(receiver_email, "Case Registration Confirmation: Your Case Reference Number", message)
 
-            if not sender_email or not sender_password:
-                print("Error: Could not find your email credentials in the .env file.")
-                return None
+def pdf_email(message, receiver_email, pdf_path=None):
+    send_mail(receiver_email, "Case Registration Confirmation: Your Case Reference Number", message, pdf_path)
 
-            msg = EmailMessage()
-            msg["From"] = f"SAPS Case Management System <{sender_email}>"
-            msg["Subject"] = "Case Registration Confirmation: Your Case Reference Number"
-            msg["To"] = receiver_email
-            msg.set_content(message)
-
-            with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
-                server.starttls()
-                server.login(sender_email, sender_password)
-                server.send_message(msg)
-
-            print(f"Email successfully sent to {receiver_email}!")
-            return True
-
-        except Exception as e:
-            print(f"Attempt {attempt + 1}/{retries} failed. Error: {e}")
-            if attempt == retries - 1:
-                return None
-
-def pdf_email(message, receiver_email, pdf_path=None, retries=3):
-    for attempt in range(retries):
-        try:
-            sender_email = os.getenv("EMAIL_USER")
-            sender_password = os.getenv("EMAIL_PASS")
-
-            if not sender_email or not sender_password:
-                print("Error: Could not find your email credentials in the .env file.")
-                return None
-
-            msg = EmailMessage()
-            msg["From"] = f"SAPS Case Management System <{sender_email}>"
-            msg["Subject"] = "Case Registration Confirmation: Your Case Reference Number"
-            msg["To"] = receiver_email
-            msg.set_content(message)
-
-            if pdf_path:
-                if os.path.exists(pdf_path):
-                    with open(pdf_path, "rb") as f:
-                        pdf_data = f.read()
-
-                    msg.add_attachment(
-                        pdf_data,
-                        maintype="application",
-                        subtype="pdf",
-                        filename=os.path.basename(pdf_path)
-                    )
-                else:
-                    print(
-                        f"Warning: PDF path '{pdf_path}' does not exist. Sending email without attachment.")
-
-            with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
-                server.starttls()
-                server.login(sender_email, sender_password)
-                server.send_message(msg)
-
-            print(f"Email successfully sent to {receiver_email}!")
-            return True
-
-        except Exception as e:
-            print(f"Attempt {attempt + 1}/{retries} failed. Error: {e}")
-            if attempt == retries - 1:
-                return None
-
-
-def caseUpdate_email(message, receiver_email, retries=3):
-    for attempt in range(retries):
-        try:
-            sender_email = os.getenv("EMAIL_USER")
-            sender_password = os.getenv("EMAIL_PASS")
-
-            if not sender_email or not sender_password:
-                print("Error: Could not find your email credentials in the .env file.")
-                return None
-
-            msg = EmailMessage()
-            msg["From"] = f"SAPS Case Management System <{sender_email}>"
-            msg["Subject"] = "Case Assignment Update"
-            msg["To"] = receiver_email
-            msg.set_content(message)
-
-            with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as server:
-                server.starttls()
-                server.login(sender_email, sender_password)
-                server.send_message(msg)
-
-            print(f"Email successfully sent to {receiver_email}!")
-            return True
-
-        except Exception as e:
-            print(f"Attempt {attempt + 1}/{retries} failed. Error: {e}")
-            if attempt == retries - 1:
-                return None
-
+def caseUpdate_email(message, receiver_email):
+    send_mail(receiver_email, "Case Assignment Update", message)
 
 try:
 
@@ -228,7 +130,7 @@ try:
         f"DATABASE={database};"
         f"UID={username};"
         f"PWD={password};"
-        "TrustServerCertificate=yes;"
+        "Encrypt=yes;TrustServerCertificate=yes;"
     )
     refined_connecting_string = urllib.parse.quote_plus(conection_string)
     engine = create_engine(
@@ -257,6 +159,7 @@ try:
     # ==========================================================
 
     def save_json_data(data):
+        print("LOG:", json.dumps(data, default=str), flush=True)
         with open('jsonToReadData.json', 'w') as file:
             json.dump(data, file, indent=4)
 
@@ -3278,12 +3181,29 @@ def case_log(token):
     except Exception as e:
         return f"<h2>Error: {str(e)}</h2>", 500
 
+import socket
+
+@hostsite.get("/smtpcheck")
+def smtpcheck():
+    results = {}
+    targets = {
+        "control_google_443": ("www.google.com", 443),
+        "gmail_587": ("smtp.gmail.com", 587),
+        "gmail_465": ("smtp.gmail.com", 465),
+    }
+    for name, (host, port) in targets.items():
+        try:
+            socket.create_connection((host, port), timeout=8).close()
+            results[name] = "open"
+        except Exception as e:
+            results[name] = f"failed: {e}"
+    return results
 
 try:
     api.add_resource(EmployeeDetails, '/employees')
     api.add_resource(Cases, '/cases')
     api.add_resource(CommanderAnalytics, '/analytics')
-    api.add_resource(Investigation, "/investigation")
+    api.add_resource(Investigation, '/investigation')
     if __name__ == '__main__':
         hostsite.run(host="0.0.0.0", port=5000, debug=True)
 except firebase_exceptions.FirebaseError as e:
