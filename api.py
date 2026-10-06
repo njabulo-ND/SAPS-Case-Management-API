@@ -25,6 +25,7 @@ import pdf_generation
 import re
 import boto3
 import aws_nova_ai
+import base64
 
 
 def safe_json_load(value):
@@ -67,191 +68,58 @@ def run_gemini(client, model, contents, config, retries=5):
 
 BASE_URL = os.getenv("BASE_URL")
 
+import base64
+import requests
+
+def send_mail(to_email, subject, body, pdf_path=None):
+    api_key = os.getenv("BREVO_API_KEY")
+    sender = os.getenv("EMAIL_USER")
+    if not api_key or not sender:
+        print("Missing BREVO_API_KEY or EMAIL_USER", flush=True)
+        return False
+    payload = {
+        "sender": {"name": "SAPS Case Management System", "email": sender},
+        "to": [{"email": to_email}],
+        "subject": subject,
+        "textContent": body,
+    }
+    if pdf_path and os.path.exists(pdf_path):
+        with open(pdf_path, "rb") as f:
+            payload["attachment"] = [{
+                "name": os.path.basename(pdf_path),
+                "content": base64.b64encode(f.read()).decode(),
+            }]
+    r = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={"api-key": api_key, "content-type": "application/json"},
+        json=payload, timeout=20,
+    )
+    print(f"Brevo {r.status_code}: {r.text}", flush=True)
+    return r.status_code in (200, 201)
 
 def send_otp_email(receiver_email):
-    try:
-
-        # 1. Generate a secure 6-digit OTP
-        otp = "".join(secrets.choice("0123456789") for _ in range(6))
-
-        # 2. Automatically pull your hidden credentials
-        sender_email = os.getenv("EMAIL_USER")
-        sender_password = os.getenv("EMAIL_PASS")
-
-        # Safety check to make sure the variables loaded correctly
-        if not sender_email or not sender_password:
-            print("Error: Could not find your email credentials in the .env file.")
-            return None
-
-        # 3. Configure server details
-        smtp_server = "smtp.gmail.com"
-        smtp_port = 587
-
-        # 4. Create the email content
-        # 4. Create a more formal email structure to pass spam filters
-        msg = EmailMessage()
-        # Change "Your Business Name" to whatever you want people to see
-        msg["From"] = f"SAPS Case Management System <{sender_email}>"
-        msg["Subject"] = "Security Verification: Your One-Time Password Code"
-        # msg["From"] = sender_email
-        msg["To"] = receiver_email
-        msg.set_content(
-            f"Dear Officer,\n\n"
-            f"We received a request to log in to / sign up for your SAPS Case Management "
-            f"account. Please use the following One-Time Password (OTP) to complete your "
-            f"verification.\n\n"
-            f"Verification Code: {otp}\n\n"
-            f"This code was generated securely and will expire shortly. If you did not "
-            f"initiate this request, please contact your system administrator immediately.\n\n"
-            f"Regards,")
-        # 5. Connect and send
-
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-
-        print(f"OTP successfully sent to {receiver_email}!")
-        return otp
-
-    except Exception as e:
-        print(f"Failed to send email. Error: {e}")
-        return None
+    otp = "".join(secrets.choice("0123456789") for _ in range(6))
+    print(f"OTP for {receiver_email}: {otp}", flush=True)
+    body = (
+        f"Dear Officer,\n\n"
+        f"We received a request to log in to / sign up for your SAPS Case Management "
+        f"account. Please use the following One-Time Password (OTP) to complete your "
+        f"verification.\n\nVerification Code: {otp}\n\n"
+        f"This code was generated securely and will expire shortly. If you did not "
+        f"initiate this request, please contact your system administrator immediately.\n\n"
+        f"Regards,")
+    ok = send_mail(receiver_email, "Security Verification: Your One-Time Password Code", body)
+    return otp if ok else None
 
 
 def sending_victim_email(message, receiver_email):
-    try:
-
-        # 2. Automatically pull your hidden credentials
-        sender_email = os.getenv("EMAIL_USER")
-        sender_password = os.getenv("EMAIL_PASS")
-
-        # Safety check to make sure the variables loaded correctly
-        if not sender_email or not sender_password:
-            print("Error: Could not find your email credentials in the .env file.")
-            return None
-
-        # 3. Configure server details
-        smtp_server = "smtp.gmail.com"
-        smtp_port = 587
-
-        # 4. Create the email content
-        # 4. Create a more formal email structure to pass spam filters
-        msg = EmailMessage()
-        # Change "Your Business Name" to whatever you want people to see
-        msg["From"] = f"SAPS Case Management System <{sender_email}>"
-        msg["Subject"] = "Case Registration Confirmation: Your Case Reference Number"
-        # msg["From"] = sender_email
-        msg["To"] = receiver_email
-        msg.set_content(message)
-
-        # 5. Connect and send
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-
-        print(f"OTP successfully sent to {receiver_email}!")
-        return
-
-    except Exception as e:
-        print(f"Failed to send email. Error: {e}")
-        return None
-
+    send_mail(receiver_email, "Case Registration Confirmation: Your Case Reference Number", message)
 
 def pdf_email(message, receiver_email, pdf_path=None):
-    try:
-
-        # 2. Automatically pull your hidden credentials
-        sender_email = os.getenv("EMAIL_USER")
-        sender_password = os.getenv("EMAIL_PASS")
-
-        # Safety check to make sure the variables loaded correctly
-        if not sender_email or not sender_password:
-            print("Error: Could not find your email credentials in the .env file.")
-            return None
-
-        # 3. Configure server details
-        smtp_server = "smtp.gmail.com"
-        smtp_port = 587
-
-        # 4. Create the email content
-        # 4. Create a more formal email structure to pass spam filters
-        msg = EmailMessage()
-        # Change "Your Business Name" to whatever you want people to see
-        msg["From"] = f"SAPS Case Management System <{sender_email}>"
-        msg["Subject"] = "Case Registration Confirmation: Your Case Reference Number"
-        # msg["From"] = sender_email
-        msg["To"] = receiver_email
-        msg.set_content(message)
-        # 4b. Attach the PDF if one was provided
-        if pdf_path:
-            if os.path.exists(pdf_path):
-                with open(pdf_path, "rb") as f:
-                    pdf_data = f.read()
-
-                msg.add_attachment(
-                    pdf_data,
-                    maintype="application",
-                    subtype="pdf",
-                    filename=os.path.basename(pdf_path)
-                )
-            else:
-                print(
-                    f"Warning: PDF path '{pdf_path}' does not exist. Sending email without attachment.")
-
-        # 5. Connect and send
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-
-        print(f"OTP successfully sent to {receiver_email}!")
-        return
-
-    except Exception as e:
-        print(f"Failed to send email. Error: {e}")
-        return None
-
+    send_mail(receiver_email, "Case Registration Confirmation: Your Case Reference Number", message, pdf_path)
 
 def caseUpdate_email(message, receiver_email):
-    try:
-
-        # 2. Automatically pull your hidden credentials
-        sender_email = os.getenv("EMAIL_USER")
-        sender_password = os.getenv("EMAIL_PASS")
-
-        # Safety check to make sure the variables loaded correctly
-        if not sender_email or not sender_password:
-            print("Error: Could not find your email credentials in the .env file.")
-            return None
-
-        # 3. Configure server details
-        smtp_server = "smtp.gmail.com"
-        smtp_port = 587
-
-        # 4. Create the email content
-        # 4. Create a more formal email structure to pass spam filters
-        msg = EmailMessage()
-        # Change "Your Business Name" to whatever you want people to see
-        msg["From"] = f"SAPS Case Management System <{sender_email}>"
-        msg["Subject"] = "Case Assignment Update"
-        msg["To"] = receiver_email
-        msg.set_content(message)
-        # 5. Connect and send
-
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-
-        print(f"OTP successfully sent to {receiver_email}!")
-        return
-
-    except Exception as e:
-        print(f"Failed to send email. Error: {e}")
-        return None
-
+    send_mail(receiver_email, "Case Assignment Update", message)
 
 try:
 
