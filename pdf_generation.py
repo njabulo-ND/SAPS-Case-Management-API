@@ -17,6 +17,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch, mm
 from reportlab.platypus import Flowable
+from reportlab.lib.utils import ImageReader
 
 
 class RoundedBox(Flowable):
@@ -24,11 +25,30 @@ class RoundedBox(Flowable):
         Flowable.__init__(self)
         self.width = width
         self.height = height
-        self.text = str(text or "")
+        self.text = text or ""
         self.radius = radius
 
     def draw(self):
         canvas = self.canv
+                # If the value is a Base64 image, draw the actual image
+        if isinstance(self.text, str) and self.text.startswith("data:image"):
+            base64_data = self.text.split(",", 1)[1]
+            image_data = base64.b64decode(base64_data)
+
+            signature = ImageReader(io.BytesIO(image_data))
+
+            canvas.drawImage(
+                signature,
+                6,
+                4,
+                width=self.width - 12,
+                height=self.height - 8,
+                preserveAspectRatio=True,
+                anchor="c",
+                mask="auto"
+            )
+
+            return
 
         # Rounded border
         canvas.roundRect(
@@ -882,17 +902,28 @@ def create_statement_form_layout(statement, styles):
     elements.append(location_table)
     elements.append(Spacer(1, 14))
 
-    # Final date and signature section
+        # Final date and signature section
+    signature_value = statement.get("signature") or ""
+
+    signature_display = RoundedBox(
+        105 * mm,
+        18 * mm,
+        signature_value
+    )
+
     final_table = Table([
         [
             Paragraph("<b>DATE</b>", styles["Normal"]),
-            Paragraph(str(statement.get("footerDate") or ""), styles["Normal"])
+            Paragraph(
+                str(statement.get("footerDate") or ""),
+                styles["Normal"]
+            )
         ],
         [
             Paragraph("<b>SIGNATURE</b>", styles["Normal"]),
-            Paragraph(str(statement.get("signature") or ""), styles["Normal"])
+            signature_display
         ]
-    ], colWidths=[55 * mm, 110 * mm], rowHeights=[12 * mm, 20 * mm])
+    ], colWidths=[55 * mm, 110 * mm])
 
     final_table.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.8, colors.grey),
@@ -904,12 +935,9 @@ def create_statement_form_layout(statement, styles):
     ]))
 
     elements.append(final_table)
-
     return elements
 
-
 def generate_case_pdf(forms, output_path="dictionary_case.pdf"):
-
     """
     Builds a combined PDF from a dictionary of forms.
 

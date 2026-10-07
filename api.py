@@ -83,7 +83,7 @@ def send_mail(to_email, subject, body, pdf_path=None):
         payload["pdf_name"] = os.path.basename(pdf_path)
     try:
         r = requests.post(url, json=payload, timeout=30)
-        print(f"Mail webhook {r.status_code}: {r.text[:300]}", flush=True)
+        #print(f"Mail webhook {r.status_code}: {r.text[:300]}", flush=True)
         return r.status_code == 200 and '"ok":true' in r.text.replace(" ", "")
     except Exception as e:
         print(f"Mail webhook failed: {e}", flush=True)
@@ -91,7 +91,7 @@ def send_mail(to_email, subject, body, pdf_path=None):
 
 def send_otp_email(receiver_email):
     otp = "".join(secrets.choice("0123456789") for _ in range(6))
-    print(f"OTP for {receiver_email}: {otp}", flush=True)
+    print(f"OTP sent to {receiver_email}", flush=True)
     body = (
         f"Dear Officer,\n\n"
         f"We received a request to log in to / sign up for your SAPS Case Management "
@@ -101,17 +101,55 @@ def send_otp_email(receiver_email):
         f"initiate this request, please contact your system administrator immediately.\n\n"
         f"Regards,")
     ok = send_mail(receiver_email, "Security Verification: Your One-Time Password Code", body)
+    if ok:
+        print(f"OTP sent to {receiver_email}", flush=True)
+    else:
+        print(f"Failed to send OTP to {receiver_email}", flush=True)
     return otp 
 
 
 def sending_victim_email(message, receiver_email):
-    send_mail(receiver_email, "Case Registration Confirmation: Your Case Reference Number", message)
+    ok = send_mail(
+        receiver_email,
+        "Case Registration Confirmation: Your Case Reference Number",
+        message
+    )
+
+    if ok:
+        print(f"Victim confirmation email sent to {receiver_email}", flush=True)
+    else:
+        print(f"Failed to send victim confirmation email to {receiver_email}", flush=True)
+
+    return ok
 
 def pdf_email(message, receiver_email, pdf_path=None):
-    send_mail(receiver_email, "Case Registration Confirmation: Your Case Reference Number", message, pdf_path)
+    ok = send_mail(
+        receiver_email,
+        "Case Registration Confirmation: Your Case Reference Number",
+        message,
+        pdf_path
+    )
+
+    if ok:
+        print(f"PDF successfully sent to {receiver_email}", flush=True)
+    else:
+        print(f"Failed to send PDF to {receiver_email}", flush=True)
+
+    return ok
 
 def caseUpdate_email(message, receiver_email):
-    send_mail(receiver_email, "Case Assignment Update", message)
+    ok = send_mail(
+        receiver_email,
+        "Case Assignment Update",
+        message
+    )
+
+    if ok:
+        print(f"Case update email sent to {receiver_email}", flush=True)
+    else:
+        print(f"Failed to send case update email to {receiver_email}", flush=True)
+
+    return ok
 
 try:
 
@@ -159,7 +197,7 @@ try:
     # ==========================================================
 
     def save_json_data(data):
-        print("LOG:", json.dumps(data, default=str), flush=True)
+        #print("LOG:", json.dumps(data, default=str), flush=True)
         with open('jsonToReadData.json', 'w') as file:
             json.dump(data, file, indent=4)
 
