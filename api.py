@@ -91,7 +91,7 @@ def send_mail(to_email, subject, body, pdf_path=None):
 
 def send_otp_email(receiver_email):
     otp = "".join(secrets.choice("0123456789") for _ in range(6))
-    print(f"OTP sent to {receiver_email}", flush=True)
+    #print(f"OTP sent to {receiver_email}", flush=True)
     body = (
         f"Dear Officer,\n\n"
         f"We received a request to log in to / sign up for your SAPS Case Management "
