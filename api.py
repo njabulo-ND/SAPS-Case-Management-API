@@ -2849,7 +2849,7 @@ class Investigation(Resource):
                     query = """
                                 UPDATE CASES
                                 SET STATUS = 'RESOLVED',
-                                    DATE_RESOLVED = GETDATE(),
+                                    DATE_RESOLVED = DATEADD(HOUR, 2, GETDATE()),
                                     OUTCOME_TYPE = :outcome_type,
                                     FINAL_VERDICT = :final_verdict,
                                     RESOLVED_BY = :resolved_by
