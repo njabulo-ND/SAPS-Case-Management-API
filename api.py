@@ -807,7 +807,7 @@ try:
                         otp_store[employee_id] = {'otp': otp,
                                                   'expiry': datetime.now() + timedelta(minutes=5)
                                                   }
-                        save_json_data({'otp for forgot password': 'sent'})
+                        save_json_data({'otp for forgot password': f'{otp}'})
                         return {'status': 'sent'}
                     else:
                         save_json_data(
@@ -1641,23 +1641,25 @@ class CommanderAnalytics(Resource):
                 ) AS STATUS,
 
                 COALESCE(
-                    NULLIF(
-                        LTRIM(
-                            RTRIM(
-                                JSON_VALUE(
-                                    CASE
-                                        WHEN ISJSON(
-                                            C.MODUS_OPERANDI
-                                        ) = 1
-                                        THEN C.MODUS_OPERANDI
-                                        ELSE '{}'
-                                    END,
-                                    '$.A_offence'
+                    UPPER(
+                        NULLIF(
+                            LTRIM(
+                                RTRIM(
+                                    JSON_VALUE(
+                                        CASE 
+                                            WHEN ISJSON(
+                                                C.MODUS_OPERANDI
+                                            ) = 1 
+                                            THEN C.MODUS_OPERANDI 
+                                            ELSE '{}' 
+                                        END, 
+                                        '$.A_offence'
+                                    )
                                 )
-                            )
-                        ),
-                        ''
-                    ),
+                            ), 
+                            ''
+                        )
+                    ), 
                     'UNSPECIFIED'
                 ) AS CASE_TYPE
 
