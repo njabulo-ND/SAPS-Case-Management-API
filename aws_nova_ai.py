@@ -107,13 +107,48 @@ def fill_all_forms(p21_form, case_number):
         the same P21 complainant statement and case number as your only source of
         information. Return one JSON object with three top-level keys:
         "investigationDiary", "modusOperandi", and "statement". Treat each
-        section below as completely self-contained - follow its own
-        instructions only, and do not let field names or logic from one
-        section bleed into another.
+        section below as self-contained for its own field logic, and do not let
+        field names from one section bleed into another. However, the facts must
+        be identical on all three forms: case number, station, date, time, place,
+        instrument and suspect descriptions must never differ between sections.
         Here is the completed P21 form and the case number, including the complainant's statement in the form:
         {json.dumps(p21_form, indent=4)}
         CASE NUMBER:
         {case_number}
+        ============================================================
+        GENERAL RULES (apply to all three sections)
+        ============================================================
+        Every field must contain a value. Never return null or an empty string,
+        except where a field below says to return "".
+        SOURCE PRIORITY (use in this order):
+        1. Facts stated in the P21 form.
+        2. Fixed defaults stated in these rules.
+        3. If neither applies, write exactly "PENDING".
+        PLACEHOLDERS (use exactly these words, never "not specified"):
+        - "N/A" = the field does not apply to this case (for example, no property
+        was involved, or no premises were entered).
+        - "PENDING" = the field applies, but the detail is not in the P21 form and
+        will be completed later by the officer or the system (for example, a
+        reference number or a postal code that cannot be worked out).
+        Never guess, estimate, or invent names, numbers, addresses, postal codes,
+        ranks or reference numbers. An honest "PENDING" is always better than a
+        fabricated detail in a case file. Never copy a value into a different field
+        just to fill it.
+        FORMATS:
+        - Dates on the diary and modus operandi: DD Month YYYY (e.g. 6 August 2026).
+        - Dates on the statement: YYYY-MM-DD (e.g. 2026-08-06).
+        - Times: 24-hour HH:MM (e.g. 21:45).
+        EXTRACTION RULES:
+        - The incident date and time are the first date and time in the statement.
+        - The deponent (the person giving the statement) is not a witness and is
+        never an officer. Never take an officer's name from the P21 text.
+        - Classify the offence from the outcome. If the victim died as a result of
+        the attack, the offence is "Murder". Do not use another classification
+        unless the statement says death did not occur.
+        - Write neutrally: say "suspects", not "murderers" or "killers". Do not
+        state anything as proven that the statement does not say.
+        - Copy suspect details exactly as written. Do not merge, reorder or
+        embellish them.
         ============================================================
         SECTION 1: investigationDiary
         ============================================================
@@ -121,42 +156,37 @@ def fill_all_forms(p21_form, case_number):
         An Investigation Diary is the chronological working record of a case -
         it captures WHEN things happened and WHAT is relevant for building the
         case, so an investigator can review the case history at a glance.
-        Fill in the following fields using ONLY what is stated or clearly and
-        reasonably inferable from the P21 form's context. Do not force an
-        answer where the context genuinely does not support one.
+        Fill in the following fields using ONLY what is stated in the P21 form.
+        Do not force an answer where the statement does not support one.
         1. station
-        The police station responsible for handling this matter, based on
-        what is stated or clearly implied in the P21 form but the  default is the jhb central station thats if the station is not
-        mentioned in the p21
+        The police station responsible for handling this matter, as stated in the
+        P21 form. If the station is not mentioned, use "JHB Central". The value
+        must be identical to the station on the statement section.
         2. casNo
-        The case number for this matter, if it is stated anywhere in the
-        P21 form or the one i sent along with the p21 form.
+        The case number, exactly as given above. Format AREA/NNNNN/YEAR
+        (e.g. JHB/00089/2026).
         3. entries
         A list of diary entries describing what happened.
         - date: the date the incident occurred, as stated in the statement
-        - time: the time the incident occurred, as stated in the statement
+        (DD Month YYYY)
+        - time: the time the incident occurred, as stated in the statement (HH:MM)
         - particulars: a factual, investigator-useful account of what
             happened, written the way an officer would log it in a diary.
-            Include details that could help build the case or lead to a
-            suspect - for example, presence of CCTV footage, distinguishing
-            suspect features, direction suspects fled, items taken, or
-            anything the complainant offered (e.g. willingness to view an
-            identification parade). Do not simply copy the statement word
-            for word - summarise it clearly and usefully it should not be to long 3 lines specifically stating the particulars
-            not explaining and story telling.
+            State who did what, to whom, where, and the outcome. Include
+            details that could help build the case or lead to a suspect - for
+            example, presence of CCTV footage, distinguishing suspect
+            features, direction suspects fled, items taken, or anything the
+            complainant offered (e.g. willingness to view an identification
+            parade). Do not copy the statement word for word. Maximum 3 lines,
+            stating the particulars only, with no story telling and no opinions.
         4. notes
-        A short 1-2 sentence high-level summary of the incident - enough
-        for someone to understand what the case is about at a glance,
-        without reading the full statement.
+        A short 1-2 sentence high-level summary of the incident: the type of
+        case, whether the suspects are known, and who identified them. Enough for
+        someone to understand what the case is about at a glance.
         5. investigatingOfficer
-        The name of the investigating officer assigned to this case, if
-        this is stated anywhere in the P21 form.
-        STRICT RULE FOR MISSING INFORMATION:
-        If the P21 form does not clearly provide a detail needed for a field
-        above, you MUST write exactly "not specified" for that field. Never
-        guess, estimate, or invent a detail that is not clearly stated in the
-        P21 form. An honest gap is always better than a fabricated detail in
-        a case file.
+        Always return "". The investigating officer is the officer who compiled
+        the case (the logged-in officer), and the system fills this in after you
+        respond. Never take this from the P21 form.
         ============================================================
         SECTION 2: modusOperandi
         ============================================================
@@ -166,146 +196,190 @@ def fill_all_forms(p21_form, case_number):
         offenders or linked incidents. The letter prefixes on each field name
         (A_, B_, C_, etc.) are just labels for form layout - ignore them and
         focus only on the meaning of the field name itself.
-        Fill in the following fields using ONLY what is stated or clearly and
-        reasonably inferable from the P21 form's context. Do not force an
-        answer where the context genuinely does not support one.
-        casNumber - the case number for this matter, if stated anywhere in
-        the P21 form.
-        A_offence - what actually happened to the victim; the specific crime
-        or wrongdoing committed against them, which is the reason this case
-        was opened (e.g. robbery, assault, theft,etc).
-        B_date - the date on which the offence occurred, i.e. the date the
-        victim was victimised, as stated in the statement.
-        C_time - the time at which the offence occurred, as stated in the
-        statement.
-        D_place - the specific place or location where the offence occurred,
-        as stated in the statement.
-        E_methodUsed - HOW the suspect(s) carried out the offence against the
-        victim; the actions and approach they used to commit the crime.
-        F_instrumentUsed - what physical object, weapon, or tool the
-        suspect(s) used to commit the offence (e.g. firearm, knife). If
-        nothing was used, say so.
+        Fill in the following fields using ONLY what is stated in the P21 form.
+        casNumber - the case number, exactly as given above.
+        ir - the Incident Report number. It is never in a statement. Always write
+        "PENDING".
+        A_offence - the specific crime committed against the victim, which is the
+        reason this case was opened (e.g. Murder, robbery, assault, theft).
+        Classify from the outcome (see general rules).
+        B_date - the date on which the offence occurred (DD Month YYYY).
+        C_time - the time at which the offence occurred (HH:MM).
+        D_place - the exact place where the offence occurred: premises name,
+        sub-location (e.g. parking area), street, suburb and city, as stated.
+        E_methodUsed - HOW the suspect(s) carried out the offence, as a short
+        phrase describing the actions in order (e.g. Physical assault followed by
+        stabbing). Not a story.
+        F_instrumentUsed - the physical object, weapon, or tool used to commit
+        the offence (e.g. firearm, knife), in one or two words. If a weapon was
+        used, do not list fists. If nothing was used, write "N/A".
         G_propertyInvolvedAndValue - if any property was taken, damaged, or
-        otherwise involved in the offence (cash, phones, a vehicle, or any
-        other possessions), describe exactly what was involved and its value
-        if stated. If no property was involved, say so clearly.
-        H_serialOrRegistrationNo - ONLY fill this in if the offence is related
-        to a vehicle being hijacked, stolen, or otherwise involved (e.g. a car
-        registration or serial number). If the case does not involve a vehicle
-        at all, or a serial/registration number is not given even though a
-        vehicle is involved, write "not specified". Do not invent a number
-        under any circumstances.
+        otherwise involved (cash, phones, a vehicle, or other possessions),
+        describe exactly what was involved and its value if stated. If no
+        property was involved, write "No property involved".
+        H_serialOrRegistrationNo - ONLY fill this in if the offence involves a
+        vehicle or an item with a stated serial or registration number. If no
+        property or vehicle is involved, write "N/A". If a vehicle is involved but
+        no number is given, write "PENDING". Do not invent a number under any
+        circumstances.
         I_suspects - a list with ONE entry per suspect described in the
         statement. For each suspect, provide:
-        - involved: a short label identifying which suspect this is (e.g.
-        "name of the suspect 1", "name of the suspect 2"), in the order they are introduced in the
+        - involved: the suspect's name if the statement gives it, otherwise
+        "Suspect 1", "Suspect 2", etc., in the order they are introduced in the
         statement.
-        - description: their individual identifying characteristics exactly
-        as described in the statement - for example estimated age, height,
-        build, and clothing. Do not merge multiple suspects into a single
-        description; each suspect gets their own separate entry in the list.
-        If the statement does not distinguish individual suspects at all (for
-        example, it only mentions "a group of suspects" with no individual
-        detail), return a single entry with involved set to "name of the suspect 1" and
-        description set to "not specified".
-        J_witnessDetails - details of anyone who witnessed the incident in any
-        way - saw it, heard it, or was otherwise present and could have
-        observed something relevant (e.g. a passerby, a companion of the
-        victim). Include any details the statement gives about them.
+        - description: their individual characteristics exactly as described in
+        the statement: sex, approximate age, height in metres, build,
+        complexion, hair, facial hair and clothing. Any detail not given is
+        written as "Not described". Do not merge multiple suspects into a single
+        description; each suspect gets their own entry. If the statement does not
+        distinguish individual suspects at all, return a single entry with
+        involved set to "Suspect 1" and description set to "Not described".
+        J_witnessDetails - details of anyone other than the deponent who
+        witnessed the incident in any way (saw it, heard it, or was present and
+        could have observed something relevant). Give name, age if stated, and
+        what they saw. If there are none, write "N/A".
         K_circulationNo, K_lcrcNo, L_sap13No, L_sap14No - these are internal
-        administrative reference numbers that are never contained in a
-        complainant's statement. Always write "not specified" for these four
-        fields, regardless of the statement's content.
-        M_comments - any additional observations from the statement that could
-        help resolve the case - useful leads, things investigators should pay
-        attention to, or notable circumstances (e.g. availability of CCTV
-        footage, willingness to attend an identification parade).
-        N_compiledBy - this section identifies the officer who compiled this
-        form. You do NOT have this information. Always leave "no", "rank",
-        and "initialAndSurname" as empty strings "".
-        O_perusedBy - this section identifies the officer who reviewed this
-        form. You do NOT have this information. Always leave "no", "rank",
-        and "initialAndSignature" as empty strings "".
+        administrative reference numbers that are never contained in a statement.
+        Always write "PENDING" for these four fields.
+        M_comments - additional investigative facts from the statement: how the
+        suspects were identified, who used the weapon, direction the suspects
+        fled, whether their whereabouts are known, witnesses available, CCTV
+        footage, willingness to attend an identification parade.
+        N_compiledBy - the officer who compiled this form (the logged-in
+        officer). The system fills this in after you respond. Always return
+        "no", "rank", and "initialAndSurname" as empty strings "".
+        O_perusedBy - the commander who reviews this form, assigned at a later
+        stage. Always return "no", "rank", and "initialAndSignature" as "PENDING".
         checklist - this is a separate administrative checklist not covered by
         the statement. Always return this as an empty list [].
-        STRICT RULE FOR MISSING INFORMATION:
-        For any field above where you ARE expected to extract information, if
-        the P21 form does not clearly provide that detail, you MUST write
-        exactly "not specified". Never guess, estimate, or invent a detail
-        that is not clearly stated in the P21 form. An honest gap is always
-        better than a fabricated detail in a case file.
         ============================================================
         SECTION 3: statement
         ============================================================
         You are completing a Statement Form for a police case file, based on
         information already captured in a P21 complainant statement.
-        Fill in the following fields using ONLY what is stated or clearly and
-        reasonably inferable from the P21 form's context. Do not force an
-        answer where the context genuinely does not support one.
-        station - the police station responsible for handling this matter,
-        based on what is stated or clearly implied in the P21 form if not you can write JHB central station.
-        cas - the case number for this matter, if stated anywhere in the
-        P21 form.
+        Fill in the following fields using ONLY what is stated in the P21 form,
+        plus ordinary context (for example, a tavern is business premises).
+        station - the police station, as stated in the P21 form. If it is not
+        mentioned, use "JHB Central". Must be identical to the diary station.
+        cas - the case number, exactly as given above.
         whenCertain vs whenUncertainRange - these two sections are
         alternatives, not both used at once. Read the statement and decide:
-        - If the complainant states a specific, exact date and time for when
-        the offence occurred (e.g. "on Saturday, 08 August 2026 at
-        approximately 19:40"), this counts as CERTAIN. Fill in
-        "whenCertain" with a short description of what happened at that
-        time, plus the date and time. In this case, leave every value inside
-        "whenUncertainRange" as "not specified".
-        - If instead the complainant is unsure of exactly when it happened and
-        can only give a range or estimate (e.g. "sometime between Friday
-        night and Saturday morning"), this counts as UNCERTAIN. Fill in
+        - If the statement gives a specific, exact date and time for when the
+        offence occurred (e.g. "on 6 August 2026 at approximately 21:45"), this
+        counts as CERTAIN. Fill in "whenCertain" with a short description of what
+        happened at that time, plus the date (YYYY-MM-DD) and time (HH:MM). In
+        this case, write "N/A" for every value inside "whenUncertainRange".
+        - If instead the deponent is unsure of exactly when it happened and can
+        only give a range or estimate (e.g. "sometime between Friday night and
+        Saturday morning"), this counts as UNCERTAIN. Fill in
         "whenUncertainRange" with a description plus the "from" and "to"
-        date/time boundaries given. In this case, leave every value inside
-        "whenCertain" as "not specified".
-        Never guess a range if a certain time is given, and never invent a
-        false sense of certainty if the complainant was actually unsure.
+        date/time boundaries given. In this case, write "N/A" for every value
+        inside "whenCertain".
+        Never guess a range if a certain time is given, and never invent a false
+        sense of certainty if the deponent was actually unsure. Note that the
+        "certain" label refers to the person giving the statement, not the
+        victim.
         dayOfWeek - work out the day of the week using the DATE found above
         (certain or uncertain), based on a real calendar - do not copy a day
         of the week merely because it happens to be mentioned in the
-        statement. Only provide this if a complete, specific date (day,
-        month, and year) was found. If no usable complete date was found, or
-        if you cannot reliably determine the day of week from it, write
-        "not specified".
-        offenceDescription - a clear, factual description of what crime or
-        wrongdoing was committed against the victim, based on the statement.
-        methodEntrance - HOW the suspect(s) gained access to the scene, if
-        this is relevant and stated (e.g. broke a window, entered through an
-        unlocked door, walked in through the front entrance). If the incident
-        did not involve gaining entry to a premises (for example, it happened
-        in an open public place), write "not specified".
-        instrumentType - the type of weapon, tool, or object used by the
-        suspect(s) to commit the offence, if any is mentioned.
-        scene - a description of the specific place where the offence
-        occurred, as stated (e.g. the name and type of location).
-        postalCode - the postal code of the scene, only if one is explicitly
-        given in the statement. Do not guess a postal code based on a suburb
-        or city name alone but if victim mentioned location which the incident
-        happend using that location you can identify to wich postal code the
-        location mentioned belongs to.
-        street name - the street the adress has on the statement if it is not there write not found
-        premisesType - the type of premises where the offence occurred (for
-        example: business/shop, private residence, open street, vehicle),
-        based on what is stated or clearly implied by the scene description.
-        footerDate and footerSignature - these are administrative sign-off
-        fields completed by the officer finalising this form, not information
-        contained in a complainant's statement. Always write "not specified"
-        for both of these fields.
-        STRICT RULE FOR MISSING INFORMATION:
-        For any field where the P21 form does not clearly state or reasonably
-        imply the needed detail through context, you MUST write exactly
-        "not specified". You may use reasonable context-based understanding
-        (for example, recognising that a shop counter and till imply a
-        business premises), but you must never invent specific facts, numbers,
-        or details that are not actually supported by the statement.
+        statement. Count carefully from the date and write the full weekday
+        name (e.g. Thursday). Only provide this if a complete, specific date
+        (day, month, and year) was found. If no usable complete date was
+        found, or if you cannot reliably determine the day of week from it,
+        write "PENDING".
+        offenceDescription - one clear, factual sentence stating who was harmed,
+        what was done, by whom, and the outcome (e.g. The deceased, Themba
+        Ndlovu, was assaulted and stabbed by three suspects following an
+        argument, resulting in his death).
+        methodEntrance - HOW the suspect(s) gained access to the scene, only if
+        the offence involved forcing or gaining entry to premises (e.g. broke a
+        window, forced a door). If no entry was involved (for example, the
+        incident happened in an open or public place), write "N/A".
+        instrumentType - the weapon, tool, or object used by the suspect(s).
+        Must match F_instrumentUsed. If none was used, write "N/A".
+
+        betweenA, betweenB, street, building, suburb, town - these six
+        fields describe the address of the place where the offence occurred.
+        Each one is its own separate top-level key of the statement
+        section. Do NOT nest them inside another object and do NOT return a
+        "scene" key. Spell the key "suburb" exactly as shown. Every one of
+        these keys must hold a text value, never null and never an empty
+        string.
+
+        The location is either EXACT or APPROXIMATE. These are alternatives,
+        not both used at once. Read the statement and decide:
+        - EXACT: the statement names a specific street and/or building where
+        the offence happened (e.g. "at Blue Moon Tavern on 7th Avenue").
+        Fill "street" and "building" with those details. Write "N/A" for
+        both "betweenA" and "betweenB".
+        - APPROXIMATE: the complainant is not sure of the exact spot and
+        describes it as being between or around two places (e.g. "between
+        the garage and the taxi rank", "between 5th and 6th Street"). Fill
+        "betweenA" with the first place and "betweenB" with the second place,
+        in the order given. Fill "street" and "building" only if the
+        statement also names them, otherwise write "N/A".
+        Never invent betweenA or betweenB from nearby streets, landmarks or
+        the direction the suspects fled. They come only from two places the
+        complainant actually gave as the approximate location. Never invent
+        a false sense of certainty if the complainant was actually unsure.
+
+        street - the street the offence happened on (e.g. 7th Avenue). Use
+        the street named for the incident location, not the deponent's home
+        street. If the location is exact but no street is stated, work it
+        out from the place named only if you reliably know it, otherwise
+        write "PENDING".
+        building - the name of the building, business or premises where the
+        offence occurred (e.g. Blue Moon Tavern). If it happened in an open
+        space with no named building, write "N/A".
+        suburb - the suburb or township of the place (e.g. Alexandra), as
+        stated, or the one the named street or premises belongs to. Always
+        filled, in both cases.
+        town - the city or town of the place (e.g. Johannesburg), as stated,
+        or the one the suburb belongs to. Always filled, in both cases.
+        Use ordinary geographic knowledge of the named place (for example,
+        knowing which suburb a named street or tavern belongs to) when the
+        statement names the place but not every part of its address. Never
+        invent a street, building or area that is not supported by the
+        statement or by what you reliably know about the place named in it.
+        Use "PENDING" only as a last resort when nothing points to a detail.
+
+        postalCode - the 4-digit postal code of the place where the
+        offence occurred. Use the one given in the
+        statement. If none is given, work it out from the place named in
+        the statement (street, building or suburb) and write the code that
+        belongs to that place. If you are not sure, write "PENDING".
+        geographicalBlock - the police sector or block code. It is never in a
+        statement. Always write "PENDING".
+        premisesType - the type of premises where the offence occurred, chosen
+        from: business/shop, private residence, open street, vehicle. Base it on
+        the scene description (a tavern or shop is business/shop). If none fits,
+        write "PENDING".
+        footerDate - the date the statement was taken, which is not the incident
+        date. It is not in the P21 form. Always write "PENDING".
+        footerSignature - the officer's sign-off, which is not in the P21 form.
+        Always write "PENDING".
+
+        BEFORE RETURNING, CHECK:
+        - Every field is present. None are empty (except the "" fields above) and
+        none say "not specified".
+        - Case number, station, date, time, place and instrument are identical on
+        all three sections.
+        - The number of suspects in I_suspects equals the number described in the
+        P21 form.
+        - dayOfWeek is the correct weekday for the statement date on a real
+        calendar. Recount it if unsure.
+        - betweenA, betweenB, street, building, suburb and town are all present
+        as separate keys, with no nested "scene" object. betweenA and betweenB
+        are "N/A" whenever the location is exact.
 
         Return ONLY valid JSON.
         Do not use markdown.
         Do not use ```json.
         Do not add explanations.
         """
+
+
+
 
         response = run_nova(
     client=bedrock_client,
